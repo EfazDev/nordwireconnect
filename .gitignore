@@ -3,4 +3,5 @@ dist
 NordWireConnect.spec
 NordWireConnectService.spec
 QuickRebuild.bat
+Debug.bat
 .DS_Store

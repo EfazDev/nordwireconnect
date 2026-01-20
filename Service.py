@@ -84,6 +84,10 @@ class NordWireService(win32serviceutil.ServiceFramework):
                 end = subprocess.run("taskkill /IM wireguard.exe /F", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
                 self.connected_tunnel = None
                 return str(end.returncode)
+            elif command == "end-wireguard-installer":
+                end = subprocess.run("taskkill /IM wireguard-installer.exe /F", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
+                self.connected_tunnel = None
+                return str(end.returncode)
             elif command.startswith("uninstall-wire-tunnel"):
                 command = command.split(" ")
                 remove = subprocess.run([os.path.join(wireguard_location, "wireguard.exe"), "/uninstalltunnelservice", command[1]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

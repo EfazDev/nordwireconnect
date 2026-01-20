@@ -23,6 +23,9 @@ import win32file # type: ignore
 import win32api # type: ignore
 import win32con # type: ignore
 import win32pipe # type: ignore
+import win32com.shell.shell as winshell # type: ignore
+import win32event # type: ignore
+import win32process # type: ignore
 import tkinter as tk
 from PIL import Image
 import win32com.client # type: ignore
@@ -60,7 +63,7 @@ city_list = None
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.0.6"
+version = "1.0.7"
 PIPE_NAME = r"\\.\pipe\NordWireConnect"
 ROOT = tk.Tk()
 
@@ -123,17 +126,17 @@ def relaunch_as_admin():
         1
     )
     sys.exit(0)
-def build_menu_from_data(data, icon=None):
+def build_menu_from_data(data, function, icon=None):
     items = []
     if isinstance(data, dict):
         for title, value in sorted(data.items()):
-            submenu = build_menu_from_data(value)
+            submenu = build_menu_from_data(value, function)
             items.append(pystray.MenuItem(title, submenu))
         return pystray.Menu(*items)
     if isinstance(data, list):
         for title, tunnel_id, exact_mode in data:
             def con(tunnel_id, exact_mode):
-                def a(icon): connect_server(tunnel_id, icon, exact_mode)
+                def a(icon): function(tunnel_id, icon, exact_mode)
                 return a
             items.append(pystray.MenuItem(
                 title,
@@ -143,7 +146,7 @@ def build_menu_from_data(data, icon=None):
     if isinstance(data, tuple):
         title, tunnel_id, exact_mode = data
         def con(tunnel_id, exact_mode):
-            def a(icon): connect_server(tunnel_id, icon, exact_mode)
+            def a(icon): function(tunnel_id, icon, exact_mode)
             return a
         return pystray.Menu(
             pystray.MenuItem(title, con(tunnel_id, exact_mode))
@@ -160,7 +163,7 @@ def move_program_files():
         shutil.copy(sys.executable, os.path.join(program_files, "NordWireConnect.exe"))
         if os.path.exists(os.path.join(cur_path, "NordSessionData.json")): shutil.copy(os.path.join(cur_path, "NordSessionData.json"), os.path.join(app_data_path, "NordSessionData.json"))
         if os.path.exists(os.path.join(cur_path, "ConnectConfig.json")): shutil.copy(os.path.join(cur_path, "ConnectConfig.json"), os.path.join(app_data_path, "ConnectConfig.json"))
-        shutil.copytree(os.path.join(os.path.dirname(__file__), "resources"), os.path.join(program_files, "resources"))
+        shutil.copytree(os.path.join(os.path.dirname(__file__), "resources"), os.path.join(program_files, "resources"), dirs_exist_ok=True)
         subprocess.run("sc stop NordWireConnectService", shell=True)
         subprocess.run("taskkill /IM NordWireConnectService.exe /F", shell=True)
         time.sleep(1)
@@ -292,6 +295,7 @@ def run_cache():
     raw_all_servers = all_servers.json if all_servers.ok else []
     all_cities = {}
     all_countries = requests.get("https://api.nordvpn.com/v1/countries")
+    all_countries = all_countries.json if all_countries.ok else []
     for s in raw_all_servers:
         for l in s["locations"]:
             c = l["country"]["city"]
@@ -371,6 +375,10 @@ def change_access_token(icon=None):
             if pystray_icon: pystray_icon.update_menu()
         else: errorMessage("The provided NordVPN Access Token is invalid.")
     else: errorMessage("The provided NordVPN Access Token is invalid.")
+def default_location(server_name: str, icon=None, exact_mode=None): 
+    if exact_mode: config_data["default_location"] = f"{exact_mode}_{server_name}"
+    else: config_data["default_location"] = server_name
+    save_configuration()
 def mark_not_connected(icon=None):
     session_data["session_time"] = 0
     session_data["connection_text"] = "Not Connected."
@@ -450,8 +458,13 @@ def differ_from_status_action(icon):
         s = disconnect(pystray_icon)
         if s == "0": successMessageBox("Successfully disconnected from NordVPN server!", "NordWireConnect")
     else: 
-        config_data["server"] = "auto"
-        connect(pystray_icon)
+        if config_data["default_location"] == "auto":
+            config_data["server"] = "auto"
+            connect(pystray_icon)
+        else:
+            mode, server_loc = config_data["default_location"].split("_")
+            config_data["server"] = server_loc
+            connect(pystray_icon, mode)
 def differ_from_status_action2(icon):
     if session_data["connection_text"].startswith("Connecting") or session_data["connection_text"].startswith("Not"): return
     connect(icon)
@@ -473,6 +486,12 @@ def differ_to_status5(icon):
     else: return "Session Time: N/A"
 def differ_to_config1(icon): return f"DNS Servers: {config_data['dns']}"
 def differ_to_config2(icon): return f"Account: {config_data.get('username', 'N/A')} (Token {len(config_data['access_token']) > 60 and 'Given' or 'Ungiven'})"
+def differ_to_config3(icon): 
+    if config_data.get("default_location") and config_data["default_location"] != "auto":
+        _, server_loc = config_data["default_location"].split("_")
+        return f"Default Location: {server_loc}"
+    else:
+        return "Default Location: Auto"
 
 # Connections
 def get_allowed_ips(): 
@@ -513,9 +532,21 @@ def connect(icon=None, exact_mode=None):
             download = requests.download(download_url, installer_path)
             if download.ok:
                 mainMessage("Installing WireGuard...")
-                install = subprocess.run(installer_path, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                proc = winshell.ShellExecuteEx(
+                    lpVerb="runas",
+                    lpFile=installer_path,
+                    lpParameters="",
+                    nShow=win32con.SW_SHOWNORMAL,
+                    fMask=0x00000040
+                )
+                handle = proc["hProcess"]
+                win32event.WaitForSingleObject(handle, win32event.INFINITE)
+                wireguard_exit_code = win32process.GetExitCodeProcess(handle)
+                send_command("end-wireguard")
+                send_command("end-wireguard-installer")
+                time.sleep(1)
                 if os.path.exists(installer_path): os.remove(installer_path)
-                if install.returncode == 0:
+                if wireguard_exit_code == 0:
                     mainMessage("WireGuard installed successfully.")
                     time.sleep(3)
                 else:
@@ -569,7 +600,7 @@ def connect(icon=None, exact_mode=None):
                 errorMessage("Unable to get NordVPN city ID.")
                 mark_not_connected(icon)
                 return
-            all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers/recommendations?&filters[city_id]={city_id}&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
+            all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers/recommendations?&filters[country_city_id]={city_id}&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
                 errorMessage("Unable to get NordVPN server recommendations.")
                 mark_not_connected(icon)
@@ -598,7 +629,7 @@ def connect(icon=None, exact_mode=None):
             shortened_name = s["name"].replace(" ", "").replace("#", "")
             country_name = s["locations"][0]["country"]["name"].replace(" ", "")
             city_name = s["locations"][0]["country"]["city"]["name"].replace(" ", "")
-            if not (config_data["server"] == "auto" or config_data["server"] == None) and not (shortened_name == config_data["server"] or city_name == config_data["server"].replace(" ", "") or country_name == config_data["server"].replace(" ", "")):
+            if not (config_data["server"] == "auto" or config_data["server"] == None) and not (shortened_name == config_data["server"].replace(" ", "").replace("#", "") or city_name == config_data["server"].replace(" ", "") or country_name == config_data["server"].replace(" ", "")):
                 continue
             if session_data["connection_text"] == "Not Connected." and session_data["connected"] == False: break
             if s["status"] != "online" or s["load"] == 0:
@@ -792,7 +823,7 @@ def app():
             run_cache()
             with open(os.path.join(app_data_path, "NordServerCache.json"), "r") as f: raw_servers = json.load(f)
         server_dictionary = {
-            "Auto": [("Auto", "auto")]
+            "Auto": [("Auto", "auto", None)]
         }
         for s in raw_servers:
             if s["status"] != "online" or s["load"] == 0:
@@ -824,7 +855,8 @@ def app():
             def a(icon, item): work_queue.put((func, (pystray_icon,)))
             return a
         image = getImageObj(os.path.join(program_files, "resources", "app_icon.ico"))
-        servers_submenu = build_menu_from_data(server_dictionary)
+        servers_submenu = build_menu_from_data(server_dictionary, connect_server)
+        auto_servers_submenu = build_menu_from_data(server_dictionary, default_location)
         server_dictionary = None; raw_servers = None # Passed to garbage collector
         pystray_icon = pystray.Icon(
             "NordWireConnect",
@@ -850,6 +882,7 @@ def app():
                     pystray.MenuItem("Change Access Token", lambda icon, item: ROOT.after(0, change_access_token, icon)),
                     pystray.MenuItem("Load Swapping", change_load_swapping, checked=check_load_swapping, radio=True),
                     pystray.MenuItem("Auto Reconnect", change_auto_connect, checked=check_auto_connect, radio=True),
+                    pystray.MenuItem(differ_to_config3, auto_servers_submenu),
                     pystray.MenuItem("Notifications", change_notifications, checked=check_notifications, radio=True),
                     pystray.MenuItem("IPv6 Stations", change_ipv6_stations, checked=check_ipv6_stations, radio=True),
                     pystray.MenuItem("Optimize Server List", change_server_list, checked=check_server_list, radio=True),
