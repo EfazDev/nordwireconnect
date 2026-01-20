@@ -1,0 +1,6 @@
+build
+dist
+NordWireConnect.spec
+NordWireConnectService.spec
+QuickRebuild.bat
+.DS_Store
