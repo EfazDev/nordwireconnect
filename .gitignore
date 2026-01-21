@@ -1,7 +1,10 @@
 build
 dist
 NordWireConnect.spec
+NordWireConnectInstaller.spec
 NordWireConnectService.spec
 QuickRebuild.bat
 Debug.bat
 .DS_Store
+installer
+__pycache__

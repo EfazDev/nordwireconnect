@@ -20,14 +20,14 @@ import win32con # type: ignore
 import win32ts # type: ignore
 import subprocess
 import servicemanager # type: ignore
+import time
 import sys
 import os
 
 # Variables
 PIPE_NAME = r"\\.\pipe\NordWireConnect"
-PATH = os.path.join("C:\\", "Program Files", "NordWireConnect", "NordWireConnect.exe")
+nordwireconnect_location = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect", "Main", "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-wireguard_configs = os.path.join(wireguard_location, "Data", "Configurations")
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'): cur_path = os.path.dirname(sys.executable)
 else: cur_path = os.path.dirname(sys.argv[0])
 
@@ -119,7 +119,7 @@ class NordWireService(win32serviceutil.ServiceFramework):
             win32process.CreateProcessAsUser(
                 user_token,
                 None,
-                f'"{PATH}"',
+                f'"{nordwireconnect_location}"',
                 None,
                 None,
                 False,
