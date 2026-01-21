@@ -845,16 +845,15 @@ def app():
         errorMessage("NordWireConnect is only supported on Windows.")
         sys.exit(1)
         return
-    
+
+    # Load Uninstaller
+    if "-uninstall-nord-wire-connect" in sys.argv: 
+        try: uninstall_app()
+        except Exception as e: errorMessage(f"There was an error during Installation Handler: {str(e)}"); sys.exit(1); return
+
     # Prepare NordWireConnect
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'): cur_path = os.path.dirname(sys.executable)
     else: cur_path = os.path.dirname(sys.argv[0])
-
-    try:
-        if "-uninstall-nord-wire-connect" in sys.argv: uninstall_app()
-        else: move_program_files()
-    except Exception as e:
-        errorMessage(f"There was an error during Installation Handler: {str(e)}"); sys.exit(1); return
     if pip_class.getAmountOfProcesses("NordWireConnect.exe") > 2: 
         errorMessage("NordWireConnect is already running right now!")
         sys.exit(1)
