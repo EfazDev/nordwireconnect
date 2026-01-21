@@ -66,7 +66,7 @@ city_list = None
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.0.8"
+version = "1.0.9"
 PIPE_NAME = r"\\.\pipe\NordWireConnect"
 ROOT = tk.Tk()
 
@@ -75,6 +75,7 @@ def systemMessage(message): colors_class.print(message, colors_class.hex_to_ansi
 def mainMessage(message): colors_class.print(message, 15)
 def errorMessage(message, title="Uh oh!"): 
     colors_class.print(message, 9)
+    message = message[:256]
     if config_data.get("notifications"): notification(title, message, img=os.path.join(program_files, "resources", "error.ico"))
     else:
         if title == "": title = "NordWireConnect"
@@ -84,6 +85,7 @@ def errorMessage(message, title="Uh oh!"):
 def warnMessage(message): colors_class.print(message, 11)
 def successMessage(message): colors_class.print(message, 10)
 def successMessageBox(message, title="Success!"):
+    message = message[:256]
     if config_data.get("notifications"): notification(title, message, img=os.path.join(program_files, "resources", "connected.ico"))
     else:
         if title == "": title = "NordWireConnect"
@@ -210,7 +212,7 @@ def connect_selected_server_button(icon=None):
     selected_server = select_server_list("Please select a server to connect to!")
     if not selected_server:
         return
-    connect_server(selected_server["tunnel_id"], pystray_icon, selected_server["exact_mode"])
+    work_queue.put((connect_server, (selected_server["tunnel_id"], pystray_icon, selected_server["exact_mode"])))
     update_tray()
 def save_auto_selected_server_button(icon=None):
     selected_server = select_server_list("Please select a server to save as a default location!")
@@ -343,7 +345,7 @@ def worker():
     while True:
         func, args = work_queue.get()
         try: func(*args)
-        except Exception as e: errorMessage(f"Error while running worker: {str(e)}")
+        except Exception as e: errorMessage(f"Error while running worker ({getattr(func, "__name__")}): {str(e)}")
         finally: work_queue.task_done()
 
 # Data Handling
@@ -537,14 +539,14 @@ def differ_from_status_action(icon):
     else: 
         if config_data["default_location"] == "auto":
             config_data["server"] = "auto"
-            connect(pystray_icon)
+            work_queue.put((connect, (pystray_icon,)))
         else:
             mode, server_loc = config_data["default_location"].split("_")
             config_data["server"] = server_loc
-            connect(pystray_icon, mode)
+            work_queue.put((connect, (pystray_icon, mode)))
 def differ_from_status_action2(icon):
     if session_data["connection_text"].startswith("Connecting") or session_data["connection_text"].startswith("Not"): return
-    connect(icon)
+    work_queue.put((connect, (pystray_icon,)))
 def differ_to_status(icon): return session_data["connection_text"]
 def differ_to_status1(icon):
     if session_data["connected"] == True: return f"City: {session_data['server']['locations'][0]['country']['city']['name']}"
@@ -636,6 +638,11 @@ def connect(icon=None, exact_mode=None):
                 return
 
         # Load NordVPN Server Recommendations
+        if not requests.get_if_connected(): 
+            mainMessage("Stopping WireGuard services...")
+            prev_stats = copy.deepcopy(session_data)
+            disconnect(icon)
+            session_data = prev_stats
         if config_data["server"] == "auto" or config_data["server"] == None or exact_mode == None:
             all_server_recommendations = requests.get("https://api.nordvpn.com/v1/servers/recommendations?&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
@@ -738,6 +745,8 @@ PersistentKeepalive = 25"""
             add = send_command(f"install-wire-tunnel {config_path}")
             if add == "0":
                 mainMessage(f"Added new WireGuard configuration for server: {s['name']}")
+                tunnel_check()
+                time.sleep(1)
                 if tunnel_check():
                     connected_server = s
                     break
@@ -792,6 +801,9 @@ def disconnect(icon=None):
         pystray_icon.update_menu()
     send_command("end-wireguard-tunnels")
     return send_command("end-wireguard")
+def brute_end_wireguard(icon=None):
+    disconnect(icon)
+    mark_not_connected(icon)
 def handle_stat_thread(icon):
     count = 0
     since_connected = 0
@@ -801,7 +813,7 @@ def handle_stat_thread(icon):
             if session_data["connected"] == True:
                 count += 1
                 since_connected += 1
-                if not requests.get_if_connected():
+                if not requests.get_if_connected() and not session_data["connection_text"].startswith("Connecting"):
                     mainMessage("Reconnecting due to loss of connection.")
                     differ_from_status_action2(icon)
                     continue
@@ -961,14 +973,15 @@ def app():
                     pystray.Menu.SEPARATOR,
                     pystray.MenuItem("Change DNS Servers", lambda icon, item: ROOT.after(0, change_dns, icon)),
                     pystray.MenuItem("Change Access Token", lambda icon, item: ROOT.after(0, change_access_token, icon)),
+                    pystray.MenuItem(differ_to_config3, lambda icon, item: ROOT.after(0, save_auto_selected_server_button, icon)),
+                    pystray.MenuItem("Set Shortcuts", create_mini_func(setup_shortcuts)),
+                    pystray.MenuItem("Brute End Wireguard", create_mini_func(brute_end_wireguard)),
                     pystray.MenuItem("Load Swapping", change_load_swapping, checked=check_load_swapping, radio=True),
                     pystray.MenuItem("Auto Reconnect", change_auto_connect, checked=check_auto_connect, radio=True),
-                    pystray.MenuItem(differ_to_config3, lambda icon, item: ROOT.after(0, save_auto_selected_server_button, icon)),
                     pystray.MenuItem("Notifications", change_notifications, checked=check_notifications, radio=True),
                     pystray.MenuItem("IPv6 Stations", change_ipv6_stations, checked=check_ipv6_stations, radio=True),
                     pystray.MenuItem("Optimize Server List", change_server_list, checked=check_server_list, radio=True),
                     pystray.MenuItem("Split Private LAN Routing", change_split_lan_routing, checked=check_split_lan_routing, radio=True),
-                    pystray.MenuItem("Set Shortcuts", create_mini_func(setup_shortcuts))
                 )),
                 pystray.MenuItem("About NordWireConnect", about),
                 pystray.MenuItem("Quit", quit_app)
