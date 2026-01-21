@@ -608,6 +608,15 @@ def connect(icon=None, exact_mode=None):
             prev_stats = copy.deepcopy(session_data)
             disconnect(icon)
             session_data = prev_stats
+        if not requests.get_if_connected():
+            errorMessage("There was an issue trying to connect to your internet. Press Cancel Connection if you want to disconnect.")
+            while not requests.get_if_connected():
+                if session_data["connection_text"] == "Not Connected." and session_data["connected"] == False: break
+                time.sleep(1)
+            if session_data["connection_text"] == "Not Connected." and session_data["connected"] == False:
+                mainMessage("Canceled connection.")
+                mark_not_connected(icon)
+                return
         if config_data["server"] == "auto" or config_data["server"] == None or exact_mode == None:
             all_server_recommendations = requests.get("https://api.nordvpn.com/v1/servers/recommendations?&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
@@ -672,10 +681,11 @@ def connect(icon=None, exact_mode=None):
         session_data = prev_stats
 
         # Block Instances of IPv6
+        mainMessage("Blocking Public IPv6 Addresses...")
         send_command("block-public-ipv6")
 
         # Start Finding Servers
-        mainMessage(f"Loop Connecting NordVPN Servers in {config_data['server']}..")
+        mainMessage(f"Connecting to NordVPN Servers in {config_data['server']}..")
         connected_server = None
         for s in all_server_recommendations:
             shortened_name = s["name"].replace(" ", "").replace("#", "")
