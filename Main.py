@@ -12,13 +12,13 @@ import sys
 import json
 import time
 import copy
-import shutil
 import ctypes
 import PyKits
 import pystray # type: ignore
 import threading
 import platform
 import subprocess
+import pythoncom # type: ignore
 import win32file # type: ignore
 import win32api # type: ignore
 import win32con # type: ignore
@@ -220,55 +220,25 @@ def save_auto_selected_server_button(icon=None):
         return
     default_location(selected_server["tunnel_id"], pystray_icon, selected_server["exact_mode"])
     update_tray()
-def move_program_files():
-    if not sys.executable.startswith(pre_program_files):
-        if not pip_class.getIfRunningWindowsAdmin():
-            mainMessage("Please relaunch this program as Admin to continue installation!")
-            relaunch_as_admin()
-            return
-        mainMessage("Installing Program Files..")
-        os.makedirs(program_files, exist_ok=True)
-        if os.path.exists(os.path.join(cur_path, "NordSessionData.json")): shutil.copy(os.path.join(cur_path, "NordSessionData.json"), os.path.join(app_data_path, "NordSessionData.json"))
-        if os.path.exists(os.path.join(cur_path, "ConnectConfig.json")): shutil.copy(os.path.join(cur_path, "ConnectConfig.json"), os.path.join(app_data_path, "ConnectConfig.json"))
-        shutil.copytree(os.path.join(os.path.dirname(__file__), "resources"), os.path.join(program_files, "resources"), dirs_exist_ok=True) 
-        subprocess.run("taskkill /IM NordWireConnect.exe /F", shell=True)
-        time.sleep(3)
-        shutil.copytree(os.path.join(os.path.dirname(__file__), "installer", "NordWireConnect"), os.path.join(program_files, "Main"), dirs_exist_ok=True)
-        subprocess.run("sc stop NordWireConnectService", shell=True)
-        subprocess.run("taskkill /IM NordWireConnectService.exe /F", shell=True)
-        time.sleep(3)
-        shutil.copytree(os.path.join(os.path.dirname(__file__), "installer", "NordWireConnectService"), os.path.join(program_files, "Service"), dirs_exist_ok=True)
-        mainMessage("Starting NordWireConnect Service..")
-        subprocess.run(
-            "sc delete NordWireConnectService",
-            shell=True,
-            check=False
-        )
-        subprocess.run(
-            f'sc create NordWireConnectService binPath= "{os.path.join(program_files, "Service", "NordWireConnectService.exe")}" start=auto',
-            shell=True,
-            check=True
-        )
-        subprocess.run("sc start NordWireConnectService", shell=True)
-        mainMessage("Setting up registry..")
-        setup_registry()
-        sys.exit(0)
 def setup_shortcuts(icon=None):
     try:
-        shell = win32com.client.Dispatch("WScript.Shell")
-        desk_shortpath = os.path.join(os.environ["USERPROFILE"], "Desktop", f"NordWireConnect.lnk")
-        desk_short = shell.CreateShortcut(desk_shortpath)
-        desk_short.TargetPath = sys.executable
-        desk_short.IconLocation = os.path.join(program_files, "resources", "app_icon.ico")
-        desk_short.Description = "Open NordWireConnect for VPN!"
-        desk_short.Save()
-        startm_shortpath = os.path.join(os.getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", f"NordWireConnect.lnk")
-        startm_short = shell.CreateShortcut(startm_shortpath)
-        startm_short.TargetPath = sys.executable
-        startm_short.IconLocation = os.path.join(program_files, "resources", "app_icon.ico")
-        startm_short.Description = "Open NordWireConnect for VPN!"
-        startm_short.Save()
-        successMessageBox(f"Successfully set up shortcuts for NordWireConnect!", "NordWireConnect")
+        pythoncom.CoInitialize()
+        try:
+            shell = win32com.client.Dispatch("WScript.Shell")
+            desk_shortpath = os.path.join(os.environ["USERPROFILE"], "Desktop", f"NordWireConnect.lnk")
+            desk_short = shell.CreateShortcut(desk_shortpath)
+            desk_short.TargetPath = sys.executable
+            desk_short.IconLocation = os.path.join(program_files, "resources", "app_icon.ico")
+            desk_short.Description = "Open NordWireConnect for VPN!"
+            desk_short.Save()
+            startm_shortpath = os.path.join(os.getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", f"NordWireConnect.lnk")
+            startm_short = shell.CreateShortcut(startm_shortpath)
+            startm_short.TargetPath = sys.executable
+            startm_short.IconLocation = os.path.join(program_files, "resources", "app_icon.ico")
+            startm_short.Description = "Open NordWireConnect for VPN!"
+            startm_short.Save()
+            successMessageBox(f"Successfully set up shortcuts for NordWireConnect!", "NordWireConnect")
+        finally: pythoncom.CoUninitialize()
     except Exception as e: errorMessage(f"Unable to save shortcuts: {str(e)}")
 def delete_shortcuts(icon=None):
     try:
@@ -515,11 +485,6 @@ def change_split_lan_routing(icon=None, item=None):
     save_configuration()
     update_tray()
 def check_split_lan_routing(icon=None, item=None): return config_data.get("split_lan_routing", False) == True
-def change_ipv6_stations(icon=None, item=None):
-    config_data["ipv6_stations"] = not config_data.get("ipv6_stations", False)
-    save_configuration()
-    update_tray()
-def check_ipv6_stations(icon=None, item=None): return config_data.get("ipv6_stations", False) == True
 
 # Differenting Status
 def differ_from_status_text(icon):
@@ -575,7 +540,7 @@ def differ_to_config3(icon):
 # Connections
 def get_allowed_ips(): 
     if config_data.get("split_lan_routing"): return "0.0.0.0/5, 8.0.0.0/7, 11.0.0.0/8, 12.0.0.0/6, 16.0.0.0/4, 32.0.0.0/3, 64.0.0.0/2, 128.0.0.0/3, 160.0.0.0/5, 168.0.0.0/6, 172.0.0.0/12, 172.32.0.0/11, 172.64.0.0/10, 172.128.0.0/9, 173.0.0.0/8, 174.0.0.0/7, 176.0.0.0/4, 192.0.0.0/9, 192.128.0.0/11, 192.160.0.0/13, 192.169.0.0/16, 192.170.0.0/15, 192.172.0.0/14, 192.176.0.0/12, 192.192.0.0/10, 193.0.0.0/8, 194.0.0.0/7, 196.0.0.0/6, 200.0.0.0/5, 208.0.0.0/4, ::/1, 8000::/2, c000::/3, e000::/4, f000::/5, f800::/6, fe00::/9, ff00::/8"
-    else: return "0.0.0.0/0, ::/0"
+    else: return "0.0.0.0/0, ::/1, 8000::/2, c000::/3, e000::/4, f000::/5, f800::/6, fe00::/9, ff00::/8"
 def connect_server(server_name: str, icon=None, exact_mode=None):
     global config_data
     previous_data = config_data
@@ -706,6 +671,9 @@ def connect(icon=None, exact_mode=None):
         disconnect(icon)
         session_data = prev_stats
 
+        # Block Instances of IPv6
+        send_command("block-public-ipv6")
+
         # Start Finding Servers
         mainMessage(f"Loop Connecting NordVPN Servers in {config_data['server']}..")
         connected_server = None
@@ -736,7 +704,7 @@ DNS = {config_data.get('dns')}
 [Peer]
 PublicKey = {wireguard_metadata[0].get("value")}
 AllowedIPs = {get_allowed_ips()}
-Endpoint = {f'[{s.get('ipv6_station')}]' if (config_data.get('ipv6_stations') == True and s.get('ipv6_station')) else s.get('station')}:51820
+Endpoint = {s.get('station')}:51820
 PersistentKeepalive = 25"""
             config_path = os.path.join(app_data_path, f"{shortened_name}.{city_name}.conf")
             with open(config_path, "w") as f: f.write(configuration)
@@ -800,6 +768,7 @@ def disconnect(icon=None):
         pystray_icon.icon = image
         pystray_icon.update_menu()
     send_command("end-wireguard-tunnels")
+    send_command("unlock-public-ipv6")
     return send_command("end-wireguard")
 def brute_end_wireguard(icon=None):
     disconnect(icon)
@@ -979,7 +948,6 @@ def app():
                     pystray.MenuItem("Load Swapping", change_load_swapping, checked=check_load_swapping, radio=True),
                     pystray.MenuItem("Auto Reconnect", change_auto_connect, checked=check_auto_connect, radio=True),
                     pystray.MenuItem("Notifications", change_notifications, checked=check_notifications, radio=True),
-                    pystray.MenuItem("IPv6 Stations", change_ipv6_stations, checked=check_ipv6_stations, radio=True),
                     pystray.MenuItem("Optimize Server List", change_server_list, checked=check_server_list, radio=True),
                     pystray.MenuItem("Split Private LAN Routing", change_split_lan_routing, checked=check_split_lan_routing, radio=True),
                 )),

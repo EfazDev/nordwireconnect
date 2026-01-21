@@ -9,5 +9,5 @@ pyinstaller --hidden-import PyKits -i "resources/app_icon.ico" --argv-emulation 
 signtool sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "installer\NordWireConnect\NordWireConnect.exe"
 
 rem Build & Sign NordWireConnectInstaller
-pyinstaller --hidden-import PyKits -i "resources/app_icon.ico" --add-data "resources;resources" --add-data "installer;installer" --argv-emulation --clean -n NordWireConnectInstaller --onefile Installer.py
+pyinstaller --hidden-import PyKits -i "resources/app_icon.ico" --add-data "resources;resources" --add-data "installer;installer" --argv-emulation --clean -n NordWireConnectInstaller --uac-admin --onefile Installer.py
 signtool sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist\NordWireConnectInstaller.exe"

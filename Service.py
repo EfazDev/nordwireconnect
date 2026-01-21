@@ -99,6 +99,29 @@ class NordWireService(win32serviceutil.ServiceFramework):
                 add = subprocess.run([os.path.join(wireguard_location, "wireguard.exe"), "/installtunnelservice", config_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 self.connected_tunnel = ".".join(os.path.basename(config_path).split(".")[:-1])
                 return str(add.returncode)
+            elif command.startswith("block-public-ipv6"):
+                cmds = [
+                    'netsh advfirewall firewall add rule name="NordWireConnect Allow IPv6 LinkLocal" dir=out action=allow protocol=IPv6 remoteip=fe80::/10',
+                    'netsh advfirewall firewall add rule name="NordWireConnect Allow IPv6 ULA" dir=out action=allow protocol=IPv6 remoteip=fd00::/8',
+                    'netsh advfirewall firewall add rule name="NordWireConnect Block IPv6 Public" dir=out action=block protocol=IPv6 remoteip=2000::/3'
+                ]
+                for cmd in cmds:
+                    add = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return "0"
+            elif command.startswith("unlock-public-ipv6"):
+                rules = [
+                    "NordWireConnect Allow IPv6 LinkLocal",
+                    "NordWireConnect Allow IPv6 ULA",
+                    "NordWireConnect Block IPv6 Public"
+                ]
+                for n in rules:
+                    subprocess.run(
+                        ["cmd.exe", "/c", f'netsh advfirewall firewall delete rule name="{n}"'],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False
+                    )
+                return "0"
             elif command == "connection-status":
                 if self.connected_tunnel: return self.connected_tunnel
                 else: return "NotConnected"

@@ -52,7 +52,7 @@ def relaunch_as_admin():
         1
     )
     sys.exit(0)
-def move_program_files():
+def install():
     if not sys.executable.startswith(pre_program_files):
         if not pip_class.getIfRunningWindowsAdmin():
             mainMessage("Please relaunch this program as Admin to continue installation!")
@@ -143,6 +143,6 @@ def app():
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'): cur_path = os.path.dirname(sys.executable)
     else: cur_path = os.path.dirname(sys.argv[0])
 
-    try: move_program_files()
+    try: install()
     except Exception as e: errorMessage(f"There was an error during Installation Handler: {str(e)}"); sys.exit(1); return
 if __name__ == "__main__": app()
