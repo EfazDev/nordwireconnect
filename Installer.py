@@ -13,6 +13,8 @@ import shutil
 import ctypes
 import PyKits
 import threading
+import datetime
+import logging
 import platform
 import subprocess
 import win32api # type: ignore
@@ -39,6 +41,27 @@ def errorMessage(message, title="Uh oh!"):
     threading.Thread(target=a, daemon=True).start()
 def warnMessage(message): colors_class.print(message, 11)
 def successMessage(message): colors_class.print(message, 10)
+def setup_logging():
+    handler_name = "Installer"
+    log_path = os.path.join(app_data_path, "Logs")
+    if not os.path.exists(log_path): os.makedirs(log_path,mode=511)
+    generated_file_name = f'NordWireConnect_{handler_name}_{datetime.datetime.now().strftime("%B_%d_%Y_%H_%M_%S_%f")}.log' 
+    if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding='utf-8')
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    file_handler = logging.FileHandler(os.path.join(log_path, generated_file_name), encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    if sys.stdout:
+        try:
+            stdout_stream = logging.StreamHandler(sys.stdout)
+            stdout_stream.setLevel(logging.INFO)
+            stdout_stream.setFormatter(logging.Formatter("%(message)s"))
+            logger.addHandler(stdout_stream)
+        except Exception: pass
+    logger.addHandler(file_handler)
+    sys.stdout = PyKits.stdout(logger, logging.INFO)
+    sys.stderr = PyKits.stdout(logger, logging.ERROR)
 
 # Installer
 def relaunch_as_admin():
@@ -58,7 +81,13 @@ def install():
             mainMessage("Please relaunch this program as Admin to continue installation!")
             relaunch_as_admin()
             return
-        mainMessage("Installing Program Files..")
+        mainMessage("Exporting Files..")
+        zip_file = os.path.join(os.path.dirname(__file__), "NordWireConnect.zip")
+        res = pip_class.unzipFile(zip_file, os.path.join(os.path.dirname(__file__), "installer"), ["NordWireConnect", "NordWireConnectService"])
+        if res.returncode != 0:
+            errorMessage("Unable to unzip NordWireConnect installation zip.")
+            return
+        mainMessage("Installing NordWireConnect..")
         os.makedirs(program_files, exist_ok=True)
         if os.path.exists(os.path.join(cur_path, "NordSessionData.json")): shutil.copy(os.path.join(cur_path, "NordSessionData.json"), os.path.join(app_data_path, "NordSessionData.json"))
         if os.path.exists(os.path.join(cur_path, "ConnectConfig.json")): shutil.copy(os.path.join(cur_path, "ConnectConfig.json"), os.path.join(app_data_path, "ConnectConfig.json"))
@@ -130,6 +159,7 @@ def get_folder_size(folder_path, formatWithAbbreviation=True):
 def app():
     global cur_path
     colors_class.fix_windows_ansi()
+    setup_logging()
     systemMessage(f"{'-'*5:^5} NordWireConnect v{version} {'-'*5:^5}")
     os.makedirs(app_data_path, exist_ok=True)
 

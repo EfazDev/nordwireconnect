@@ -16,7 +16,7 @@ NordWireConnect and Wireguard will require Administrator permissions before inst
 - Auto Reconnect (similar to Wireguard where if you restart while connected, you reconnect again after reboot)
 - Load Swapping (If load is more than or equal to 50%, reconnect servers)
 - IPv6 Stations (Allow access to connect to IPv6 NordVPN servers, very unlikely to find a server)
-- Optimize Server List (Load only 350 servers on the Server dropdown menu instead of all 8000+ servers)
+- Optimize Server List (Load only 500 servers on the Server dropdown menu instead of all 8000+ servers)
 - Set Shortcuts (Creates Desktop Shortcuts)
 
 ## Rebuilding

@@ -1,5 +1,5 @@
 """
-PyKits v1.7.1 | Made by Efaz from efaz.dev
+PyKits v1.7.5 | Made by Efaz from efaz.dev
 
 A usable set of classes with extra functions that can be used within apps. \n
 Import from file: 
@@ -36,7 +36,7 @@ However! Classes may depend on other classes. Use this resource list:
 """
 
 # Module Information
-__version__ = "1.7.1"
+__version__ = "1.7.5"
 __license__ = "MIT"
 __author__ = "EfazDev"
 __maintainer__ = "EfazDev"
@@ -1124,8 +1124,8 @@ class request:
         if not location_header: return ""
         if location_header.startswith("/"): return host + location_header
         return location_header
-    def get_if_connected(self):
-        try: self._socket.create_connection(("8.8.8.8", 443), timeout=3).close(); return True # Connect to Google failed?
+    def get_if_connected(self, server: str="8.8.8.8", port: int=443, timeout: int=3):
+        try: self._socket.create_connection((server, port), timeout=timeout).close(); return True # Connect to server failed = Disconnected
         except Exception: return False
     def get_url_scheme(self, url: str): 
         obj = self._urlparse.urlparse(url)

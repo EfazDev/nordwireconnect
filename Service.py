@@ -26,7 +26,8 @@ import os
 
 # Variables
 PIPE_NAME = r"\\.\pipe\NordWireConnect"
-nordwireconnect_location = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect", "Main", "NordWireConnect.exe")
+program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
+nordwireconnect_location = os.path.join(program_files, "Main", "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'): cur_path = os.path.dirname(sys.executable)
 else: cur_path = os.path.dirname(sys.argv[0])
@@ -63,6 +64,7 @@ class NordWireService(win32serviceutil.ServiceFramework):
         self.last_session_id = None
         self.connected_tunnel = None
         self.cached_routing = []
+        self.cleared_older = False
     def SvcStop(self):
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
         win32event.SetEvent(self.stop_event)
@@ -122,6 +124,11 @@ class NordWireService(win32serviceutil.ServiceFramework):
                         check=False
                     )
                 return "0"
+            elif command.startswith("cleared-older-version"):
+                if self.cleared_older:
+                    return "0"
+                else:
+                    return "1"
             elif command == "connection-status":
                 if self.connected_tunnel: return self.connected_tunnel
                 else: return "NotConnected"
@@ -135,6 +142,14 @@ class NordWireService(win32serviceutil.ServiceFramework):
                 self.last_session_id = None
                 return
             if self.ui_running and session_id == self.last_session_id: return
+            try:
+                if os.path.exists(os.path.join(program_files, "NordWireConnect.exe")):
+                    os.remove(os.path.join(program_files, "NordWireConnect.exe"))
+                    self.cleared_older = True
+                if os.path.exists(os.path.join(program_files, "NordWireConnectService.exe")):
+                    os.remove(os.path.join(program_files, "NordWireConnectService.exe"))
+                    self.cleared_older = True
+            except Exception as e: servicemanager.LogInfoMsg("Clearing Older Versions of NordWireConnect..")
             user_token = win32ts.WTSQueryUserToken(session_id)
             env = win32profile.CreateEnvironmentBlock(user_token, False)
             startup = win32process.STARTUPINFO()
