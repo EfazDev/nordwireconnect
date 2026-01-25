@@ -46,14 +46,15 @@ private_key = None
 config_data = {
     "access_token": "",
     "username": "",
-    "dns": "1.1.1.1, 1.0.0.1",
+    "dns": "103.86.96.100, 103.86.99.100",
     "server": "auto",
-    "auto_connect": False,
+    "auto_connect": True,
     "notifications": False,
     "optimize_server_list": False,
     "default_location": "auto",
     "load_swapping": False,
-    "split_lan_routing": False
+    "split_lan_routing": False,
+    "loss_connect_protection": True
 }
 session_data = {
     "connected": False,
@@ -66,7 +67,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.0.9"
+version = "1.1.0"
 PIPE_NAME = r"\\.\pipe\NordWireConnect"
 ROOT = tk.Tk()
 
@@ -131,7 +132,12 @@ def set_icon(img):
     if pystray_icon:
         pystray_icon.icon = image
         update_tray()
+    if img != "connected.ico": unneeding_state()
 def setup(icon): pystray_icon.visible = True
+def needing_state():
+    ctypes.windll.kernel32.SetThreadExecutionState(0x80000001 | 0x00000040)
+def unneeding_state():
+    ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
 def quit_app(icon, item=None):
     global stop_app
     try:
@@ -480,8 +486,14 @@ def check_server_list(icon=None, item=None): return config_data.get("optimize_se
 def change_split_lan_routing(icon=None, item=None):
     config_data["split_lan_routing"] = not config_data.get("split_lan_routing", False)
     save_configuration()
+    if session_data["connected"] == True: differ_from_status_action2(icon)
     update_tray()
 def check_split_lan_routing(icon=None, item=None): return config_data.get("split_lan_routing", False) == True
+def change_loss_connect_protection(icon=None, item=None):
+    config_data["loss_connect_protection"] = not config_data.get("loss_connect_protection", True)
+    save_configuration()
+    update_tray()
+def check_loss_connect_protection(icon=None, item=None): return config_data.get("loss_connect_protection", True) == True
 
 # Differenting Status
 def differ_from_status_text(icon):
@@ -532,17 +544,27 @@ def differ_to_config3(icon):
     if config_data.get("default_location") and config_data["default_location"].lower() != "auto":
         _, server_loc = config_data["default_location"].split("_")
         return f"Default Location: {server_loc}"
-    else:
-        return "Default Location: Auto"
+    else: return "Default Location: Auto"
 
 # Connections
 def get_allowed_ips(): 
-    if config_data.get("split_lan_routing"): return "0.0.0.0/5, 8.0.0.0/7, 11.0.0.0/8, 12.0.0.0/6, 16.0.0.0/4, 32.0.0.0/3, 64.0.0.0/2, 128.0.0.0/3, 160.0.0.0/5, 168.0.0.0/6, 172.0.0.0/12, 172.32.0.0/11, 172.64.0.0/10, 172.128.0.0/9, 173.0.0.0/8, 174.0.0.0/7, 176.0.0.0/4, 192.0.0.0/9, 192.128.0.0/11, 192.160.0.0/13, 192.169.0.0/16, 192.170.0.0/15, 192.172.0.0/14, 192.176.0.0/12, 192.192.0.0/10, 193.0.0.0/8, 194.0.0.0/7, 196.0.0.0/6, 200.0.0.0/5, 208.0.0.0/4, ::/1, 8000::/2, c000::/3, e000::/4, f000::/5, f800::/6, fe00::/9, ff00::/8"
-    else: return "0.0.0.0/0, ::/1, 8000::/2, c000::/3, e000::/4, f000::/5, f800::/6, fe00::/9, ff00::/8"
+    if config_data.get("split_lan_routing"): return "0.0.0.0/5, 8.0.0.0/7, 11.0.0.0/8, 12.0.0.0/6, 16.0.0.0/4, 32.0.0.0/3, 64.0.0.0/2, 128.0.0.0/3, 160.0.0.0/5, 168.0.0.0/6, 172.0.0.0/12, 172.32.0.0/11, 172.64.0.0/10, 172.128.0.0/9, 173.0.0.0/8, 174.0.0.0/7, 176.0.0.0/4, 192.0.0.0/9, 192.128.0.0/11, 192.160.0.0/13, 192.169.0.0/16, 192.170.0.0/15, 192.172.0.0/14, 192.176.0.0/12, 192.192.0.0/10, 193.0.0.0/8, 194.0.0.0/7, 196.0.0.0/6, 200.0.0.0/5, 208.0.0.0/4"
+    else: return "0.0.0.0/0"
 def connect_server(server_name: str, icon=None, exact_mode=None):
     config_data["server"] = server_name
     try: connect(icon, exact_mode=exact_mode)
     except Exception: pass
+def get_client_public_key(private_key):
+    pub_key_path = os.path.join(app_data_path, "NordPublicKey.json")
+    if not os.path.exists(pub_key_path):
+        pub_key = send_command(f"generate-public-key {private_key}")
+        preshared = send_command(f"generate-preshared")
+        with open(pub_key_path, "w") as f: json.dump({"pub": pub_key, "pre": preshared}, f)
+    else:
+        with open(pub_key_path, "r") as f: public_key_json = json.load(f)
+        pub_key = public_key_json.get("pub")
+        preshared = public_key_json.get("pre")
+    return pub_key, preshared
 def connect_session():
     global session_data
     if session_data["connected"] == True and config_data.get("auto_connect", True) == True:
@@ -711,14 +733,13 @@ def connect(icon=None, exact_mode=None):
                 set_icon("error.ico")
                 return
         else:
-            all_server_recommendations = requests.get("https://api.nordvpn.com/v1/servers/recommendations?&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=10000")
+            all_server_recommendations = requests.get("https://api.nordvpn.com/v1/servers/recommendations?&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
                 errorMessage("Unable to get NordVPN server recommendations.")
                 mark_not_connected(icon)
                 set_icon("error.ico")
                 return
             all_server_recommendations = all_server_recommendations.json
-            all_server_recommendations.sort(key=lambda x: x["load"])
         mainMessage(f"Loaded {len(all_server_recommendations)} NordVPN server recommendation(s).")
 
         # Stop Wireguard Service
@@ -731,6 +752,7 @@ def connect(icon=None, exact_mode=None):
         # Start Finding Servers
         mainMessage(f"Connecting to NordVPN Servers in {config_data['server']}..")
         connected_server = None
+        attempts = 0
         for s in all_server_recommendations:
             shortened_name = s["name"].replace(" ", "").replace("#", "")
             country_name = s["locations"][0]["country"]["name"].replace(" ", "")
@@ -749,22 +771,25 @@ def connect(icon=None, exact_mode=None):
                     wireguard_metadata = m.get("metadata", {})
                     break
             if not wireguard_metadata: continue
+            # client_public, preshared = get_client_public_key(private_key)
             configuration = f"""# {shortened_name}.{city_name}.conf
 [Interface]
 PrivateKey = {private_key}
 Address = 10.5.0.2/32
 DNS = {config_data.get('dns')}
+MTU = 1380
 
 [Peer]
 PublicKey = {wireguard_metadata[0].get("value")}
 AllowedIPs = {get_allowed_ips()}
-Endpoint = {s.get('station')}:51820
-PersistentKeepalive = 10"""
+Endpoint = {s.get('hostname')}:51820
+PersistentKeepalive = 25"""
             config_path = os.path.join(app_data_path, f"{shortened_name}.{city_name}.conf")
             with open(config_path, "w") as f: f.write(configuration)
             if session_data["connection_text"] == "Not Connected" and session_data["connected"] == False: break
             send_command(f"uninstall-wire-tunnel {shortened_name}.{city_name}")
             add = send_command(f"install-wire-tunnel {config_path}")
+            attempts += 1
             if add == "0":
                 mainMessage(f"Added new WireGuard configuration for server: {s['name']}")
                 tunnel_check(timeout=3)
@@ -796,6 +821,7 @@ PersistentKeepalive = 10"""
             session_data_modified()
             successMessageBox(f"Successfully connected to server: {connected_server['name']}!", "Yay!")
             set_icon("connected.ico")
+            needing_state()
         else:
             errorMessage("Unable to connect to a NordVPN server.")
             mark_not_connected(icon)
@@ -820,7 +846,6 @@ def disconnect(icon=None, only_disconnect=False):
         set_icon("app_icon.ico")
         update_tray()
     send_command("end-wireguard-tunnels")
-    send_command("unlock-public-ipv6")
     return send_command("end-wireguard")
 def brute_end_wireguard(icon=None):
     disconnect(icon)
@@ -834,7 +859,7 @@ def handle_stat_thread(icon):
             if session_data["connected"] == True:
                 count += 1
                 since_connected += 1
-                if not tunnel_check() and not session_data["connection_text"].startswith("Connecting"):
+                if count % 10 == 0 and config_data.get("loss_connect_protection", True) == True and not tunnel_check() and not session_data["connection_text"].startswith("Connecting"):
                     mainMessage("Reconnecting due to loss of connection.")
                     differ_from_status_action2(icon)
                     continue
@@ -968,6 +993,7 @@ def app():
                     pystray.MenuItem("Notifications", change_notifications, checked=check_notifications, radio=True),
                     pystray.MenuItem("Optimize Server List", change_server_list, checked=check_server_list, radio=True),
                     pystray.MenuItem("Split Private LAN Routing", change_split_lan_routing, checked=check_split_lan_routing, radio=True),
+                    pystray.MenuItem("Loss Connect Protection", change_loss_connect_protection, checked=check_loss_connect_protection, radio=True),
                 )),
                 pystray.MenuItem("About NordWireConnect", about),
                 pystray.MenuItem("Quit", quit_app)

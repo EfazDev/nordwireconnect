@@ -71,10 +71,19 @@ class NordWireService(win32serviceutil.ServiceFramework):
     def SvcDoRun(self):
         servicemanager.LogInfoMsg("NordWireConnect service starting")
         self.ReportServiceStatus(win32service.SERVICE_RUNNING)
-        threading.Thread(target=self.pipe_server).start()
+        threading.Thread(target=self.pipe_server, daemon=True).start()
         while True:
             if win32event.WaitForSingleObject(self.stop_event, 2000) == win32event.WAIT_OBJECT_0: break
             self.ensure_ui_running()
+    def SvcOtherEx(self, control, event_type, data):
+        if control == win32service.SERVICE_CONTROL_POWEREVENT:
+            if event_type == win32con.PBT_APMSUSPEND:
+                servicemanager.LogInfoMsg("System suspending")
+                self.ui_running = False
+                self.last_session_id = None
+            elif event_type in (win32con.PBT_APMRESUMEAUTOMATIC, win32con.PBT_APMRESUMECRITICAL):
+                servicemanager.LogInfoMsg("System resumed")
+                time.sleep(5)
     def handle_command(self, command: str) -> str:
         servicemanager.LogInfoMsg(f"Received command: {command}")
         try:
@@ -101,6 +110,15 @@ class NordWireService(win32serviceutil.ServiceFramework):
                 add = subprocess.run([os.path.join(wireguard_location, "wireguard.exe"), "/installtunnelservice", config_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 self.connected_tunnel = ".".join(os.path.basename(config_path).split(".")[:-1])
                 return str(add.returncode)
+            elif command.startswith("generate-preshared"):
+                command = command.split(" ")
+                add = subprocess.run([os.path.join(wireguard_location, "wg.exe"), "genpsk"], text=True, capture_output=True)
+                return add.stdout.strip()
+            elif command.startswith("generate-public-key"):
+                command = command.split(" ")
+                private_key = " ".join(command[1:])
+                add = subprocess.run([os.path.join(wireguard_location, "wg.exe"), "pubkey"], text=True, capture_output=True, input=private_key)
+                return add.stdout.strip()
             elif command.startswith("block-public-ipv6"):
                 cmds = [
                     'netsh advfirewall firewall add rule name="NordWireConnect Allow IPv6 LinkLocal" dir=out action=allow protocol=IPv6 remoteip=fe80::/10',
@@ -175,7 +193,7 @@ class NordWireService(win32serviceutil.ServiceFramework):
             self.last_session_id = None
     def pipe_server(self):
         servicemanager.LogInfoMsg("Pipe server starting")
-        while True:
+        while win32event.WaitForSingleObject(self.stop_event, 0) != win32event.WAIT_OBJECT_0:
             pipe = None
             try:
                 sa = create_pipe_sa()
