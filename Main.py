@@ -67,7 +67,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.1.0"
+version = "1.1.5"
 PIPE_NAME = r"\\.\pipe\NordWireConnect"
 ROOT = tk.Tk()
 
@@ -846,6 +846,7 @@ def disconnect(icon=None, only_disconnect=False):
         set_icon("app_icon.ico")
         update_tray()
     send_command("end-wireguard-tunnels")
+    send_command("unlock-public-ipv6")
     return send_command("end-wireguard")
 def brute_end_wireguard(icon=None):
     disconnect(icon)
@@ -960,7 +961,7 @@ def app():
     try:
         mainMessage("Creating Tray App..")
         def create_mini_func(func, connected=False):
-            def a(icon, item): addToThread(func, (pystray_icon,), connection=connected)
+            def a(icon, item): addToThread(func, (pystray_icon,), connection=False)
             return a
         image = getImageObj(os.path.join(program_files, "resources", "app_icon.ico"))
         pystray_icon = pystray.Icon(

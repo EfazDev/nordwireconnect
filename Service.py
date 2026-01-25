@@ -52,6 +52,15 @@ def create_pipe_sa():
     sa.SECURITY_DESCRIPTOR = sd
     return sa
 
+# CMD
+def shell_run(cmd: str):
+    return subprocess.run(
+        cmd,
+        shell=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
 # Service Class
 class NordWireService(win32serviceutil.ServiceFramework):
     _svc_name_ = "NordWireConnectService"
@@ -88,15 +97,15 @@ class NordWireService(win32serviceutil.ServiceFramework):
         servicemanager.LogInfoMsg(f"Received command: {command}")
         try:
             if command == "end-wireguard-tunnels":
-                kill = subprocess.run("powershell -Command \"Get-Service WireGuardTunnel* | Stop-Service -Force\"", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
+                kill = shell_run("powershell -Command \"Get-Service WireGuardTunnel* | Stop-Service -Force\"")
                 self.connected_tunnel = None
                 return str(kill.returncode)
             elif command == "end-wireguard":
-                end = subprocess.run("taskkill /IM wireguard.exe /F", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
+                end = shell_run("taskkill /IM wireguard.exe /F")
                 self.connected_tunnel = None
                 return str(end.returncode)
             elif command == "end-wireguard-installer":
-                end = subprocess.run("taskkill /IM wireguard-installer.exe /F", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
+                end = shell_run("taskkill /IM wireguard-installer.exe /F")
                 self.connected_tunnel = None
                 return str(end.returncode)
             elif command.startswith("uninstall-wire-tunnel"):
@@ -105,6 +114,7 @@ class NordWireService(win32serviceutil.ServiceFramework):
                 if self.connected_tunnel == command[1]: self.connected_tunnel = None
                 return str(remove.returncode)
             elif command.startswith("install-wire-tunnel"):
+                self.handle_command("unbrick-adapter")
                 command = command.split(" ")
                 config_path = " ".join(command[1:])
                 add = subprocess.run([os.path.join(wireguard_location, "wireguard.exe"), "/installtunnelservice", config_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -119,14 +129,50 @@ class NordWireService(win32serviceutil.ServiceFramework):
                 private_key = " ".join(command[1:])
                 add = subprocess.run([os.path.join(wireguard_location, "wg.exe"), "pubkey"], text=True, capture_output=True, input=private_key)
                 return add.stdout.strip()
+            elif command.startswith("unbrick-adapter"):
+                # Check for Bricks
+                unbrick = False
+                out = subprocess.run(f'powershell -NoProfile -Command "(Get-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv4).Forwarding"', shell=True, capture_output=True, text=True).stdout.lower()
+                if "enabled" in out: unbrick = True
+                out = subprocess.run(f'powershell -NoProfile -Command "(Get-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv6).Forwarding"', shell=True, capture_output=True, text=True).stdout.lower()
+                if "enabled" in out: unbrick = True
+                out = subprocess.run(f'netsh interface ipv4 show interface {idx}', shell=True, capture_output=True, text=True).stdout.lower()
+                if "weakhostsend" in out and "enabled" in out: unbrick = True
+                if "weakhostreceive" in out and "enabled" in out: unbrick = True
+                out = subprocess.run(f'netsh interface ipv6 show interface {idx}', shell=True, capture_output=True, text=True).stdout.lower()
+                if "weakhostsend" in out and "enabled" in out: unbrick = True
+                if "weakhostreceive" in out and "enabled" in out: unbrick = True
+
+                # Should Unbrick?
+                if not unbrick: return "0"
+                
+                # Unbrick
+                get_interfaces_req = subprocess.run(
+                    "powershell -NoProfile -Command \"Get-NetRoute -DestinationPrefix 0.0.0.0/0 | Select-Object -ExpandProperty InterfaceIndex\"",
+                    shell=True,
+                    capture_output=True,
+                    text=True
+                )
+                interface_indexes = {
+                    int(line.strip())
+                    for line in get_interfaces_req.stdout.splitlines()
+                    if line.strip().isdigit()
+                }
+                for idx in interface_indexes:
+                    shell_run(f'powershell -NoProfile -Command "Set-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv4 -Forwarding Disabled -ErrorAction SilentlyContinue"')
+                    shell_run(f'powershell -NoProfile -Command "Set-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv6 -Forwarding Disabled -ErrorAction SilentlyContinue"')
+                    shell_run(f'netsh interface ipv4 set interface {idx} weakhostsend=disabled')
+                    shell_run(f'netsh interface ipv4 set interface {idx} weakhostreceive=disabled')
+                    shell_run(f'netsh interface ipv6 set interface {idx} weakhostsend=disabled')
+                    shell_run(f'netsh interface ipv6 set interface {idx} weakhostreceive=disabled')
+                return "0"
             elif command.startswith("block-public-ipv6"):
                 cmds = [
                     'netsh advfirewall firewall add rule name="NordWireConnect Allow IPv6 LinkLocal" dir=out action=allow protocol=IPv6 remoteip=fe80::/10',
                     'netsh advfirewall firewall add rule name="NordWireConnect Allow IPv6 ULA" dir=out action=allow protocol=IPv6 remoteip=fd00::/8',
                     'netsh advfirewall firewall add rule name="NordWireConnect Block IPv6 Public" dir=out action=block protocol=IPv6 remoteip=2000::/3'
                 ]
-                for cmd in cmds:
-                    add = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                for cmd in cmds: add = shell_run(cmd)
                 return "0"
             elif command.startswith("unlock-public-ipv6"):
                 rules = [
@@ -143,10 +189,8 @@ class NordWireService(win32serviceutil.ServiceFramework):
                     )
                 return "0"
             elif command.startswith("cleared-older-version"):
-                if self.cleared_older:
-                    return "0"
-                else:
-                    return "1"
+                if self.cleared_older: return "0"
+                else: return "1"
             elif command == "connection-status":
                 if self.connected_tunnel: return self.connected_tunnel
                 else: return "NotConnected"
