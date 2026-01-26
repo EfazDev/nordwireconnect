@@ -10,15 +10,16 @@ import os
 import sys
 import time
 import shutil
+import typing
 import ctypes
 import PyKits
-import threading
-import datetime
 import logging
+import datetime
 import platform
-import subprocess
 import win32api # type: ignore
 import win32con # type: ignore
+import threading
+import subprocess
 
 # Variables
 pip_class = PyKits.pip()
@@ -114,7 +115,7 @@ def install():
         mainMessage("Setting up registry..")
         setup_registry()
         sys.exit(0)
-def setup_registry(icon=None):
+def setup_registry():
     try:
         mainMessage("Marking Program Installation into Windows..")
         app_reg_path = "Software\\NordWireConnect"
@@ -133,13 +134,13 @@ def setup_registry(icon=None):
         win32api.RegSetValueEx(registry_key, "EstimatedSize", 0, win32con.REG_DWORD, min(get_folder_size(program_files, formatWithAbbreviation=False) // 1024, 0xFFFFFFFF))
         win32api.RegCloseKey(registry_key)
     except Exception as e: errorMessage(f"Unable to setup registry: {str(e)}")
-def format_size(size_bytes):
+def format_size(size_bytes: int) -> str:
     if size_bytes == 0: return "0 Bytes"
     size_units = ["Bytes", "KB", "MB", "GB", "TB"]
     unit_index = 0
     while size_bytes >= 1024 and unit_index < len(size_units) - 1: size_bytes /= 1024; unit_index += 1
     return f"{size_bytes:.2f} {size_units[unit_index]}"
-def get_folder_size(folder_path, formatWithAbbreviation=True):
+def get_folder_size(folder_path: str, formatWithAbbreviation: bool=True) -> typing.Union[str, int]:
     total_size = 0
     stack = [folder_path]
     while stack:

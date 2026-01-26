@@ -6,31 +6,28 @@ https://www.efaz.dev
 """
 
 # Modules
-import win32serviceutil # type: ignore
-import win32service # type: ignore
+import os
+import time
+import win32ts # type: ignore
+import win32con # type: ignore
+import win32file # type: ignore
+import win32pipe # type: ignore
+import threading # type: ignore
+import subprocess
 import win32event # type: ignore
+import win32service # type: ignore
 import win32process # type: ignore
 import win32profile # type: ignore
 import win32security # type: ignore
 import ntsecuritycon # type: ignore
-import win32pipe # type: ignore
-import win32file # type: ignore
-import threading # type: ignore
-import win32con # type: ignore
-import win32ts # type: ignore
-import subprocess
 import servicemanager # type: ignore
-import time
-import sys
-import os
+import win32serviceutil # type: ignore
 
 # Variables
-PIPE_NAME = r"\\.\pipe\NordWireConnect"
+service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "Main", "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'): cur_path = os.path.dirname(sys.executable)
-else: cur_path = os.path.dirname(sys.argv[0])
 
 # Pipe Administration
 def create_pipe_sa():
@@ -53,26 +50,24 @@ def create_pipe_sa():
     return sa
 
 # Unbricking
-def shell_run(cmd: str):
+def shell_run(cmd: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd,
         shell=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
-def check_for_unbricks(idx: str):
-    out = subprocess.run(f'powershell -NoProfile -Command "(Get-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv4).Forwarding"', shell=True, capture_output=True, text=True).stdout.lower()
-    if "enabled" in out: return True
-    out = subprocess.run(f'powershell -NoProfile -Command "(Get-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv6).Forwarding"', shell=True, capture_output=True, text=True).stdout.lower()
-    if "enabled" in out: return True
-    out = subprocess.run(f'netsh interface ipv4 show interface {idx}', shell=True, capture_output=True, text=True).stdout.lower()
+def check_for_unbricks(idx: str) -> bool:
+    out = subprocess.run(f"netsh interface ipv4 show interface {idx}", shell=True, capture_output=True, text=True).stdout.lower()
     for ln in out.splitlines():
-        if "Weak Host Sends" in ln and "enabled" in ln: return True
-        if "Weak Host Receives" in ln and "enabled" in ln: return True
-    out = subprocess.run(f'netsh interface ipv6 show interface {idx}', shell=True, capture_output=True, text=True).stdout.lower()
+        if "weak host sends" in ln and "enabled" in ln: return True
+        if "weak host receives" in ln and "enabled" in ln: return True
+        if "forwarding" in ln and "enabled" in ln: return True
+    out = subprocess.run(f"netsh interface ipv6 show interface {idx}", shell=True, capture_output=True, text=True).stdout.lower()
     for ln in out.splitlines():
-        if "Weak Host Sends" in ln and "enabled" in ln: return True
-        if "Weak Host Receives" in ln and "enabled" in ln: return True
+        if "weak host sends" in ln and "enabled" in ln: return True
+        if "weak host receives" in ln and "enabled" in ln: return True
+        if "forwarding" in ln and "enabled" in ln: return True
     return False
 
 # Service Class
@@ -134,6 +129,22 @@ class NordWireService(win32serviceutil.ServiceFramework):
                 add = subprocess.run([os.path.join(wireguard_location, "wireguard.exe"), "/installtunnelservice", config_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 self.connected_tunnel = ".".join(os.path.basename(config_path).split(".")[:-1])
                 return str(add.returncode)
+            elif command.startswith("combined-disconnect"):
+                command = command.split(" ")
+                if len(command) > 1:
+                    server_name = " ".join(command[1:])
+                    self.handle_command(f"uninstall-wire-tunnel {server_name}")
+                self.handle_command("end-wireguard-tunnels")
+                return self.handle_command("end-wireguard")
+            elif command.startswith("reinstall-wire-tunnel"):
+                command = command.split(" ")
+                shortened_name = command[1]
+                config_path = " ".join(command[2:])
+                self.handle_command(f"uninstall-wire-tunnel {shortened_name}")
+                return self.handle_command(f"install-wire-tunnel {config_path}")
+            elif command.startswith("combined-end-wireguard"):
+                self.handle_command("end-wireguard")
+                return self.handle_command("end-wireguard-installer")
             elif command.startswith("generate-preshared"):
                 command = command.split(" ")
                 add = subprocess.run([os.path.join(wireguard_location, "wg.exe"), "genpsk"], text=True, capture_output=True)
@@ -160,12 +171,8 @@ class NordWireService(win32serviceutil.ServiceFramework):
                     if not check_for_unbricks(idx): continue
                     
                     # Unbrick
-                    shell_run(f'powershell -NoProfile -Command "Set-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv4 -Forwarding Disabled -ErrorAction SilentlyContinue"')
-                    shell_run(f'powershell -NoProfile -Command "Set-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv6 -Forwarding Disabled -ErrorAction SilentlyContinue"')
-                    shell_run(f'netsh interface ipv4 set interface {idx} weakhostsend=disabled')
-                    shell_run(f'netsh interface ipv4 set interface {idx} weakhostreceive=disabled')
-                    shell_run(f'netsh interface ipv6 set interface {idx} weakhostsend=disabled')
-                    shell_run(f'netsh interface ipv6 set interface {idx} weakhostreceive=disabled')
+                    shell_run(f"netsh interface ipv4 set interface {idx} forwarding=disabled weakhostsend=disabled weakhostreceive=disabled")
+                    shell_run(f"netsh interface ipv6 set interface {idx} forwarding=disabled weakhostsend=disabled weakhostreceive=disabled")
                 return "0"
             elif command.startswith("block-public-ipv6"):
                 cmds = [
@@ -243,7 +250,7 @@ class NordWireService(win32serviceutil.ServiceFramework):
             try:
                 sa = create_pipe_sa()
                 pipe = win32pipe.CreateNamedPipe(
-                    PIPE_NAME,
+                    service_pipe,
                     win32pipe.PIPE_ACCESS_DUPLEX,
                     win32pipe.PIPE_TYPE_MESSAGE |
                     win32pipe.PIPE_READMODE_MESSAGE |
