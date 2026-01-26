@@ -669,6 +669,7 @@ def connect(exact_mode: str=None):
                 errorMessage("There was an issue trying to connect to your internet.")
                 set_icon("error.ico")
                 return
+        should_filter = False
         if config_data["server"] == "auto" or config_data["server"] == None or exact_mode == None:
             all_server_recommendations = requests.get("https://api.nordvpn.com/v1/servers/recommendations?&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
@@ -677,6 +678,7 @@ def connect(exact_mode: str=None):
                 set_icon("error.ico")
                 return
             all_server_recommendations = all_server_recommendations.json
+            should_filter = True
         elif exact_mode == "country":
             country_list_path = os.path.join(app_data_path, "NordCountryCache.json")
             if not os.path.exists(country_list_path):
@@ -702,6 +704,7 @@ def connect(exact_mode: str=None):
                 set_icon("error.ico")
                 return
             all_server_recommendations = all_server_recommendations.json
+            should_filter = True
         elif exact_mode == "city":
             city_list_path = os.path.join(app_data_path, "NordCityCache.json")
             if not os.path.exists(city_list_path):
@@ -727,6 +730,7 @@ def connect(exact_mode: str=None):
                 set_icon("error.ico")
                 return
             all_server_recommendations = all_server_recommendations.json
+            should_filter = True
         elif exact_mode == "server":
             server_list_path = os.path.join(app_data_path, "NordServerIDCache.json")
             if not os.path.exists(server_list_path):
@@ -757,12 +761,14 @@ def connect(exact_mode: str=None):
                 set_icon("error.ico")
                 return
             all_server_recommendations = all_server_recommendations.json
-        ind = 0
-        channeled_list = []
-        for s in all_server_recommendations:
-            if (ind % 10) + 1 == config_data.get("connection_channel", 1): channeled_list.append(s)
-            ind += 1
-        all_server_recommendations = channeled_list
+            should_filter = True
+        if should_filter:
+            ind = 0
+            channeled_list = []
+            for s in all_server_recommendations:
+                if (ind % 10) + 1 == config_data.get("connection_channel", 1): channeled_list.append(s)
+                ind += 1
+            all_server_recommendations = channeled_list
         mainMessage(f"Loaded {len(all_server_recommendations)} NordVPN server recommendation(s).")
 
         # Start Finding Servers
