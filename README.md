@@ -12,6 +12,7 @@ NordWireConnect and Wireguard will require Administrator permissions before inst
 
 ## Features & Tweaks
 - Custom DNS (default is set to NordVPN)
+- Connection Channels (assign your computer to a channel in case to prevent conflicts on other computers on same account)
 - Private LAN Splitting (Connect to private IP addresses while using VPN for the internet) 
 - Auto Reconnect (similar to Wireguard where if you restart while connected, you reconnect again after reboot)
 - Load Swapping (If load is more than or equal to 50%, reconnect servers)
