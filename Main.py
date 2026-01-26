@@ -455,7 +455,7 @@ def change_connection_channel():
     inputted = simpledialog.askstring(title="Connection Channel Input", prompt="Enter the Connection Channel you would like to assign this computer (1-10):")
     try:
         inputted = int(inputted)
-        if inputted > 1 and inputted <= 10:
+        if inputted >= 1 and inputted <= 10:
             config_data["connection_channel"] = inputted
             successMessageBox(f"Successfully changed Connection Channel to {inputted}!", "NordWireConnect")
             save_configuration()
