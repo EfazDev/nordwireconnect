@@ -31,16 +31,16 @@ cur_path = os.path.dirname(os.path.abspath(__file__))
 version = "1.1.5"
 
 # Logging and Messages
-def systemMessage(message): colors_class.print(message, colors_class.hex_to_ansi2("#3E5FFF"))
-def mainMessage(message): colors_class.print(message, 15)
-def errorMessage(message, title="Uh oh!"): 
+def systemMessage(message: str): colors_class.print(message, colors_class.hex_to_ansi2("#3E5FFF"))
+def mainMessage(message: str): colors_class.print(message, 15)
+def errorMessage(message: str, title: str="Uh oh!"): 
     colors_class.print(message, 9)
     if title == "": title = "NordWireConnect"
     elif title != "NordWireConnect": title = f"NordWireConnect: {title}"
     def a(): ctypes.windll.user32.MessageBoxW(0, message, title, 0x0 | 0x10)
     threading.Thread(target=a, daemon=True).start()
-def warnMessage(message): colors_class.print(message, 11)
-def successMessage(message): colors_class.print(message, 10)
+def warnMessage(message: str): colors_class.print(message, 11)
+def successMessage(message: str): colors_class.print(message, 10)
 def setup_logging():
     handler_name = "Installer"
     log_path = os.path.join(app_data_path, "Logs")

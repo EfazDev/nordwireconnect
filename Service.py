@@ -52,7 +52,7 @@ def create_pipe_sa():
     sa.SECURITY_DESCRIPTOR = sd
     return sa
 
-# CMD
+# Unbricking
 def shell_run(cmd: str):
     return subprocess.run(
         cmd,
@@ -60,6 +60,20 @@ def shell_run(cmd: str):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
+def check_for_unbricks(idx: str):
+    out = subprocess.run(f'powershell -NoProfile -Command "(Get-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv4).Forwarding"', shell=True, capture_output=True, text=True).stdout.lower()
+    if "enabled" in out: return True
+    out = subprocess.run(f'powershell -NoProfile -Command "(Get-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv6).Forwarding"', shell=True, capture_output=True, text=True).stdout.lower()
+    if "enabled" in out: return True
+    out = subprocess.run(f'netsh interface ipv4 show interface {idx}', shell=True, capture_output=True, text=True).stdout.lower()
+    for ln in out.splitlines():
+        if "Weak Host Sends" in ln and "enabled" in ln: return True
+        if "Weak Host Receives" in ln and "enabled" in ln: return True
+    out = subprocess.run(f'netsh interface ipv6 show interface {idx}', shell=True, capture_output=True, text=True).stdout.lower()
+    for ln in out.splitlines():
+        if "Weak Host Sends" in ln and "enabled" in ln: return True
+        if "Weak Host Receives" in ln and "enabled" in ln: return True
+    return False
 
 # Service Class
 class NordWireService(win32serviceutil.ServiceFramework):
@@ -84,7 +98,7 @@ class NordWireService(win32serviceutil.ServiceFramework):
         while True:
             if win32event.WaitForSingleObject(self.stop_event, 2000) == win32event.WAIT_OBJECT_0: break
             self.ensure_ui_running()
-    def SvcOtherEx(self, control, event_type, data):
+    def SvcOtherEx(self, control: int, event_type: int, data):
         if control == win32service.SERVICE_CONTROL_POWEREVENT:
             if event_type == win32con.PBT_APMSUSPEND:
                 servicemanager.LogInfoMsg("System suspending")
@@ -130,23 +144,6 @@ class NordWireService(win32serviceutil.ServiceFramework):
                 add = subprocess.run([os.path.join(wireguard_location, "wg.exe"), "pubkey"], text=True, capture_output=True, input=private_key)
                 return add.stdout.strip()
             elif command.startswith("unbrick-adapter"):
-                # Check for Bricks
-                unbrick = False
-                out = subprocess.run(f'powershell -NoProfile -Command "(Get-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv4).Forwarding"', shell=True, capture_output=True, text=True).stdout.lower()
-                if "enabled" in out: unbrick = True
-                out = subprocess.run(f'powershell -NoProfile -Command "(Get-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv6).Forwarding"', shell=True, capture_output=True, text=True).stdout.lower()
-                if "enabled" in out: unbrick = True
-                out = subprocess.run(f'netsh interface ipv4 show interface {idx}', shell=True, capture_output=True, text=True).stdout.lower()
-                if "weakhostsend" in out and "enabled" in out: unbrick = True
-                if "weakhostreceive" in out and "enabled" in out: unbrick = True
-                out = subprocess.run(f'netsh interface ipv6 show interface {idx}', shell=True, capture_output=True, text=True).stdout.lower()
-                if "weakhostsend" in out and "enabled" in out: unbrick = True
-                if "weakhostreceive" in out and "enabled" in out: unbrick = True
-
-                # Should Unbrick?
-                if not unbrick: return "0"
-                
-                # Unbrick
                 get_interfaces_req = subprocess.run(
                     "powershell -NoProfile -Command \"Get-NetRoute -DestinationPrefix 0.0.0.0/0 | Select-Object -ExpandProperty InterfaceIndex\"",
                     shell=True,
@@ -159,6 +156,10 @@ class NordWireService(win32serviceutil.ServiceFramework):
                     if line.strip().isdigit()
                 }
                 for idx in interface_indexes:
+                    # Should Unbrick?
+                    if not check_for_unbricks(idx): continue
+                    
+                    # Unbrick
                     shell_run(f'powershell -NoProfile -Command "Set-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv4 -Forwarding Disabled -ErrorAction SilentlyContinue"')
                     shell_run(f'powershell -NoProfile -Command "Set-NetIPInterface -InterfaceIndex {idx} -AddressFamily IPv6 -Forwarding Disabled -ErrorAction SilentlyContinue"')
                     shell_run(f'netsh interface ipv4 set interface {idx} weakhostsend=disabled')

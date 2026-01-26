@@ -11,6 +11,7 @@ import sys
 import json
 import time
 import ctypes
+import typing
 import PyKits
 import pystray # type: ignore
 import threading
@@ -70,11 +71,13 @@ stop_app = False
 version = "1.1.5"
 PIPE_NAME = r"\\.\pipe\NordWireConnect"
 ROOT = tk.Tk()
+Icon = pystray.Icon
+MenuItem = pystray.MenuItem
 
 # Logging and Messages
-def systemMessage(message): colors_class.print(message, colors_class.hex_to_ansi2("#3E5FFF"))
-def mainMessage(message): colors_class.print(message, 15)
-def errorMessage(message, title="Uh oh!"): 
+def systemMessage(message: str): colors_class.print(message, colors_class.hex_to_ansi2("#3E5FFF"))
+def mainMessage(message: str): colors_class.print(message, 15)
+def errorMessage(message: str, title: str="Uh oh!"): 
     colors_class.print(message, 9)
     message = message[:256]
     if config_data.get("notifications"): notification(title, message, img=os.path.join(program_files, "resources", "error.ico"))
@@ -83,9 +86,9 @@ def errorMessage(message, title="Uh oh!"):
         elif title != "NordWireConnect": title = f"NordWireConnect: {title}"
         def a(): ctypes.windll.user32.MessageBoxW(0, message, title, 0x0 | 0x10)
         addToThread(a, ())
-def warnMessage(message): colors_class.print(message, 11)
-def successMessage(message): colors_class.print(message, 10)
-def successMessageBox(message, title="Success!"):
+def warnMessage(message: str): colors_class.print(message, 11)
+def successMessage(message: str): colors_class.print(message, 10)
+def successMessageBox(message: str, title: str="Success!"):
     message = message[:256]
     if config_data.get("notifications"): notification(title, message, img=os.path.join(program_files, "resources", "connected.ico"))
     else:
@@ -116,34 +119,34 @@ def setup_logging():
     sys.stderr = PyKits.stdout(logger, logging.ERROR)
 
 # UI App
-def addToThread(function, args, connection=False): 
+def addToThread(function: typing.Callable, args: typing.Iterable, connection: bool=False): 
     if connection == False: threading.Thread(target=function, args=args, daemon=True).start()
     else: work_queue.put((function, args))
-def getImageObj(img=None):
+def unicon(function: typing.Callable, args: typing.Iterable=[]):
+    def new_func(icon: Icon=None, item: MenuItem=None): function(*args)
+    return new_func
+def getImageObj(img: str=None):
     try: return Image.open(img)
     except Exception: return Image.new("RGB", (64, 64), color = 'blue')
-def notification(title, message, img=None):
-    def a(img): 
-        if not img: img = os.path.join(program_files, "resources", "app_icon.ico")
+def notification(title: str, message: str, img: str=None):
+    def a():
         if pystray_icon: pystray_icon.notify(message, title)
-    addToThread(a, (img,))
-def set_icon(img):
+    addToThread(a, ())
+def set_icon(img: str):
     image = getImageObj(os.path.join(program_files, "resources", img))
     if pystray_icon:
         pystray_icon.icon = image
         update_tray()
     if img != "connected.ico": unneeding_state()
-def setup(icon): pystray_icon.visible = True
-def needing_state():
-    ctypes.windll.kernel32.SetThreadExecutionState(0x80000001 | 0x00000040)
-def unneeding_state():
-    ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
-def quit_app(icon, item=None):
+def setup(): pystray_icon.visible = True
+def needing_state(): ctypes.windll.kernel32.SetThreadExecutionState(0x80000001 | 0x00000040)
+def unneeding_state(): ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+def quit_app():
     global stop_app
     try:
-        if config_data.get("auto_connect", True): disconnect(pystray_icon, only_disconnect=True)
+        if config_data.get("auto_connect", True): disconnect(only_disconnect=True)
         else:
-            disconnect(pystray_icon)
+            disconnect()
             sess = os.path.join(app_data_path, "NordSessionData.json")
             if os.path.exists(sess): os.remove(sess)
     except: pass
@@ -151,7 +154,7 @@ def quit_app(icon, item=None):
     stop_app = True
 def update_tray():
     if pystray_icon: pystray_icon.update_menu()
-def about(icon):
+def about():
     def a(): ctypes.windll.user32.MessageBoxW(0, f"Version: v{version}\nMade by @EfazDev\nhttps://www.efaz.dev", "About NordWireConnect", 0x0 | 0x00000040)
     addToThread(a, ())
 def relaunch_as_admin():
@@ -165,7 +168,7 @@ def relaunch_as_admin():
         1
     )
     sys.exit(0)
-def select_server_list(message="Please select a server!"):
+def select_server_list(message: str="Please select a server!"):
     if not os.path.exists(os.path.join(app_data_path, "NordServerCache.json")):
         return
     with open(os.path.join(app_data_path, "NordServerCache.json"), "r") as f: raw_servers = json.load(f)
@@ -219,13 +222,13 @@ def select_server_list(message="Please select a server!"):
     btn_frame.pack(side="bottom", pady=6)
     dropdown_btn = tk.Button(win, text="Select server ▼", width=28)
     dropdown_btn.pack(pady=6)
-    def on_select(title, tunnel_id, exact_mode):
+    def on_select(title: str, tunnel_id: str, exact_mode: str):
         selected["title"] = title
         selected["tunnel_id"] = tunnel_id
         selected["exact_mode"] = exact_mode
         if title.lower() == "auto": dropdown_btn.config(text=tunnel_id)
         else: dropdown_btn.config(text=title)
-    def build(parent_menu, data):
+    def build(parent_menu, data: typing.Union[dict, list, tuple]):
         if isinstance(data, dict):
             for title, value in sorted(data.items(), key=lambda x: ("\0" if x[0].lower() == "auto" else x[0])):
                 submenu = tk.Menu(parent_menu, tearoff=0)
@@ -270,19 +273,19 @@ def select_server_list(message="Please select a server!"):
     win.grab_set()
     win.wait_window()
     return result["value"]
-def connect_selected_server_button(icon=None):
+def connect_selected_server_button():
     selected_server = select_server_list("Please select a server to connect to!")
     if not selected_server:
         return
-    addToThread(connect_server, (selected_server["tunnel_id"], pystray_icon, selected_server["exact_mode"]), connection=True)
+    addToThread(connect_server, (selected_server["tunnel_id"], selected_server["exact_mode"]), connection=True)
     update_tray()
-def save_auto_selected_server_button(icon=None):
+def save_auto_selected_server_button():
     selected_server = select_server_list("Please select a server to save as a default location!")
     if not selected_server:
         return
-    default_location(selected_server["tunnel_id"], pystray_icon, selected_server["exact_mode"])
+    default_location(selected_server["tunnel_id"], selected_server["exact_mode"])
     update_tray()
-def setup_shortcuts(icon=None):
+def setup_shortcuts():
     try:
         pythoncom.CoInitialize()
         try:
@@ -302,14 +305,14 @@ def setup_shortcuts(icon=None):
             successMessageBox(f"Successfully set up shortcuts for NordWireConnect!", "NordWireConnect")
         finally: pythoncom.CoUninitialize()
     except Exception as e: errorMessage(f"Unable to save shortcuts: {str(e)}")
-def delete_shortcuts(icon=None):
+def delete_shortcuts():
     try:
         desk_shortpath = os.path.join(os.environ["USERPROFILE"], "Desktop", f"NordWireConnect.lnk")
         if os.path.exists(desk_shortpath): os.remove(desk_shortpath)
         startm_shortpath = os.path.join(os.getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", f"NordWireConnect.lnk")
         if os.path.exists(startm_shortpath): os.remove(startm_shortpath)
     except Exception as e: errorMessage(f"Unable to delete shortcuts: {str(e)}")
-def delete_registry(icon=None):
+def delete_registry():
     try:
         app_reg_path = "Software\\NordWireConnect"
         win32api.RegDeleteKey(win32con.HKEY_LOCAL_MACHINE, app_reg_path)
@@ -409,7 +412,7 @@ def send_command(cmd: str) -> str:
     _, data = win32file.ReadFile(handle, 4096) 
     win32file.CloseHandle(handle) 
     return data.decode("utf-8")
-def format_seconds(seconds):
+def format_seconds(seconds: int):
     seconds = int(seconds)
     days, remaining_seconds = divmod(seconds, 86400)
     hours, remaining_seconds = divmod(remaining_seconds, 3600)
@@ -421,7 +424,7 @@ def get_if_virtual_location(server: dict):
             for val in sp["values"]:
                 if val["value"] == "true": return True
     return False
-def change_dns(icon=None):
+def change_dns():
     inputted = simpledialog.askstring(title="DNS Input", prompt="Enter IPv4 DNS servers to use (comma separated):")
     ips = inputted.split(", ")
     added = [ip for ip in ips if requests.get_if_ip(ip)]
@@ -431,7 +434,7 @@ def change_dns(icon=None):
         successMessageBox(f"Successfully changed DNS to: {', '.join(added)}", "NordWireConnect")
         update_tray()
     else: errorMessage("No valid IPv4 DNS servers were provided.")
-def change_access_token(icon=None):
+def change_access_token():
     global private_key
     inputted = simpledialog.askstring(title="Access Token Input", prompt="Enter your generated NordVPN Access Token from the NordVPN website (https://my.nordaccount.com/dashboard/nordvpn/):")
     if len(inputted) > 50:
@@ -446,61 +449,61 @@ def change_access_token(icon=None):
             update_tray()
         else: errorMessage("The provided NordVPN Access Token is invalid.")
     else: errorMessage("The provided NordVPN Access Token is invalid.")
-def default_location(server_name: str, icon=None, exact_mode=None): 
+def default_location(server_name: str, exact_mode: str=None): 
     if exact_mode: config_data["default_location"] = f"{exact_mode}_{server_name}"
     else: config_data["default_location"] = server_name
     save_configuration()
-def mark_not_connected(icon=None):
+def mark_not_connected():
     session_data["session_time"] = 0
     session_data["connection_text"] = "Not Connected"
     session_data["connected"] = False
     session_data["server"] = None
     session_data_modified()
     update_tray()
-def save_configuration(icon=None):
+def save_configuration():
     mainMessage("Saving configuration..")
     with open(os.path.join(app_data_path, "ConnectConfig.json"), "w") as f: json.dump(config_data, f, indent=4)
 
 # Toggle Functions
-def change_load_swapping(icon=None, item=None):
+def change_load_swapping():
     config_data["load_swapping"] = not config_data.get("load_swapping", False)
     save_configuration()
     update_tray()
-def check_load_swapping(icon=None, item=None): return config_data.get("load_swapping", False) == True
-def change_auto_connect(icon=None, item=None):
+def check_load_swapping(): return config_data.get("load_swapping", False) == True
+def change_auto_connect():
     config_data["auto_connect"] = not config_data.get("auto_connect", True)
     save_configuration()
     update_tray()
-def check_auto_connect(icon=None, item=None): return config_data.get("auto_connect", True) == True
-def change_notifications(icon=None, item=None):
+def check_auto_connect(): return config_data.get("auto_connect", True) == True
+def change_notifications():
     config_data["notifications"] = not config_data.get("notifications", False)
     save_configuration()
     update_tray()
-def check_notifications(icon=None, item=None): return config_data.get("notifications", False) == True
-def change_server_list(icon=None, item=None):
+def check_notifications(): return config_data.get("notifications", False) == True
+def change_server_list():
     config_data["optimize_server_list"] = not config_data.get("optimize_server_list", False)
     addToThread(run_cache, ())
     save_configuration()
     update_tray()
-def check_server_list(icon=None, item=None): return config_data.get("optimize_server_list", False) == True
-def change_split_lan_routing(icon=None, item=None):
+def check_server_list(): return config_data.get("optimize_server_list", False) == True
+def change_split_lan_routing():
     config_data["split_lan_routing"] = not config_data.get("split_lan_routing", False)
     save_configuration()
-    if session_data["connected"] == True: differ_from_status_action2(icon)
+    if session_data["connected"] == True: differ_from_status_action2()
     update_tray()
-def check_split_lan_routing(icon=None, item=None): return config_data.get("split_lan_routing", False) == True
-def change_loss_connect_protection(icon=None, item=None):
+def check_split_lan_routing(): return config_data.get("split_lan_routing", False) == True
+def change_loss_connect_protection():
     config_data["loss_connect_protection"] = not config_data.get("loss_connect_protection", True)
     save_configuration()
     update_tray()
-def check_loss_connect_protection(icon=None, item=None): return config_data.get("loss_connect_protection", True) == True
+def check_loss_connect_protection(): return config_data.get("loss_connect_protection", True) == True
 
 # Differenting Status
-def differ_from_status_text(icon):
+def differ_from_status_text():
     if session_data["connected"] == True: return "Disconnect from Server"
     elif session_data["connection_text"].startswith("Connecting"): return "Cancel Connection"
     else: return "Connect to Server"
-def differ_from_status_action(icon=None):
+def differ_from_status_action():
     if session_data["connection_text"].startswith("Connecting"):
         session_data["session_time"] = 0
         session_data["connection_text"] = "Not Connected"
@@ -508,39 +511,39 @@ def differ_from_status_action(icon=None):
         session_data["server"] = None
         set_icon("app_icon.ico")
     elif session_data["connected"] == True: 
-        s = disconnect(pystray_icon)
+        s = disconnect()
         if s == "0": successMessageBox("Successfully disconnected from NordVPN server!", "NordWireConnect")
     else: 
         if config_data.get("default_location", "auto") == "auto":
             config_data["server"] = "auto"
-            addToThread(connect, (pystray_icon,), connection=True)
+            addToThread(connect, (), connection=True)
         else:
             mode, server_loc = config_data.get("default_location").split("_")
             config_data["server"] = server_loc
-            addToThread(connect, (pystray_icon, mode), connection=True)
-def differ_from_status_action2(icon):
+            addToThread(connect, (mode,), connection=True)
+def differ_from_status_action2():
     if session_data["connection_text"].startswith("Connecting") or session_data["connection_text"].startswith("Not"): return
-    def pre_connect(): connect(pystray_icon, exact_mode=session_data.get("exact_connect"))
+    def pre_connect(): connect(exact_mode=session_data.get("exact_connect"))
     addToThread(pre_connect, (), connection=True)
-def differ_to_status(icon): return session_data["connection_text"]
-def differ_to_status1(icon):
+def differ_to_status(): return session_data["connection_text"]
+def differ_to_status1():
     if session_data["connected"] == True: return f"City: {session_data['server']['locations'][0]['country']['city']['name']}"
     else: return "City: N/A"
-def differ_to_status2(icon): 
+def differ_to_status2(): 
     if session_data["connected"] == True: return f"IP Address: {session_data['server']['station']}"
     else: return "IP Address: N/A"
-def differ_to_status3(icon): 
+def differ_to_status3(): 
     if session_data["connected"] == True: return f"Hostname: {session_data['server']['hostname']}"
     else: return "Hostname: N/A"
-def differ_to_status4(icon): 
+def differ_to_status4(): 
     if session_data["connected"] == True: return f"Load: {session_data['current_load']}%"
     else: return "Load: N/A"
-def differ_to_status5(icon): 
+def differ_to_status5(): 
     if session_data["connected"] == True: return f"Session Time: {format_seconds(session_data['session_time'])}"
     else: return "Session Time: N/A"
-def differ_to_config1(icon): return f"DNS Servers: {config_data['dns']}"
-def differ_to_config2(icon): return f"Account: {config_data.get('username', 'N/A')} (Token {len(config_data['access_token']) > 60 and 'Given' or 'Ungiven'})"
-def differ_to_config3(icon): 
+def differ_to_config1(): return f"DNS Servers: {config_data['dns']}"
+def differ_to_config2(): return f"Account: {config_data.get('username', 'N/A')} (Token {len(config_data['access_token']) > 60 and 'Given' or 'Ungiven'})"
+def differ_to_config3(): 
     if config_data.get("default_location") and config_data["default_location"].lower() != "auto":
         _, server_loc = config_data["default_location"].split("_")
         return f"Default Location: {server_loc}"
@@ -550,11 +553,11 @@ def differ_to_config3(icon):
 def get_allowed_ips(): 
     if config_data.get("split_lan_routing"): return "0.0.0.0/5, 8.0.0.0/7, 11.0.0.0/8, 12.0.0.0/6, 16.0.0.0/4, 32.0.0.0/3, 64.0.0.0/2, 128.0.0.0/3, 160.0.0.0/5, 168.0.0.0/6, 172.0.0.0/12, 172.32.0.0/11, 172.64.0.0/10, 172.128.0.0/9, 173.0.0.0/8, 174.0.0.0/7, 176.0.0.0/4, 192.0.0.0/9, 192.128.0.0/11, 192.160.0.0/13, 192.169.0.0/16, 192.170.0.0/15, 192.172.0.0/14, 192.176.0.0/12, 192.192.0.0/10, 193.0.0.0/8, 194.0.0.0/7, 196.0.0.0/6, 200.0.0.0/5, 208.0.0.0/4"
     else: return "0.0.0.0/0"
-def connect_server(server_name: str, icon=None, exact_mode=None):
+def connect_server(server_name: str, exact_mode: str=None):
     config_data["server"] = server_name
-    try: connect(icon, exact_mode=exact_mode)
+    try: connect(exact_mode=exact_mode)
     except Exception: pass
-def get_client_public_key(private_key):
+def get_client_public_key(private_key: str):
     pub_key_path = os.path.join(app_data_path, "NordPublicKey.json")
     if not os.path.exists(pub_key_path):
         pub_key = send_command(f"generate-public-key {private_key}")
@@ -571,7 +574,7 @@ def connect_session():
         mainMessage("Restoring previous session...")
         org = session_data.get("org_server_id", "auto")
         org_exact_connect = session_data.get("exact_connect")
-        connect_server(session_data["server"]["name"].replace(" ", "").replace("#", ""), pystray_icon, exact_mode="server")
+        connect_server(session_data["server"]["name"].replace(" ", "").replace("#", ""), exact_mode="server")
         config_data["server"] = org
         session_data["exact_connect"] = org_exact_connect
     elif session_data["connection_text"].startswith("Connecting"):
@@ -583,7 +586,7 @@ def connect_session():
         session_data["exact_connect"] = None
         differ_from_status_action()
     elif send_command("connection-status") != "NotConnected": disconnect()
-def connect(icon=None, exact_mode=None):
+def connect(exact_mode: str=None):
     global session_data
     try:
         session_data["session_time"] = 0
@@ -594,7 +597,7 @@ def connect(icon=None, exact_mode=None):
 
         if not private_key:
             errorMessage("Please provide your Access Token before trying to connect!")
-            mark_not_connected(icon)
+            mark_not_connected()
             set_icon("error.ico")
             return
 
@@ -626,17 +629,17 @@ def connect(icon=None, exact_mode=None):
                     time.sleep(3)
                 else:
                     errorMessage("Failed to install WireGuard.")
-                    mark_not_connected(icon)
+                    mark_not_connected()
                     set_icon("error.ico")
                     return
             else:
                 errorMessage("Failed to download WireGuard installer.")
-                mark_not_connected(icon)
+                mark_not_connected()
                 set_icon("error.ico")
                 return
 
         # Load NordVPN Server Recommendations
-        disconnect(icon, only_disconnect=True)
+        disconnect(only_disconnect=True)
         if not tunnel_check():
             if config_data.get("auto_connect", True) == True:
                 errorMessage("There was an issue trying to connect to your internet. Press Cancel Connection if you want to disconnect.")
@@ -656,7 +659,7 @@ def connect(icon=None, exact_mode=None):
             all_server_recommendations = requests.get("https://api.nordvpn.com/v1/servers/recommendations?&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
                 errorMessage("Unable to get NordVPN server recommendations.")
-                mark_not_connected(icon)
+                mark_not_connected()
                 set_icon("error.ico")
                 return
             all_server_recommendations = all_server_recommendations.json
@@ -664,7 +667,7 @@ def connect(icon=None, exact_mode=None):
             country_list_path = os.path.join(app_data_path, "NordCountryCache.json")
             if not os.path.exists(country_list_path):
                 errorMessage("Unable to find NordVPN country list.")
-                mark_not_connected(icon)
+                mark_not_connected()
                 set_icon("error.ico")
                 return
             with open(country_list_path, "r") as f: country_list = json.load(f)
@@ -675,13 +678,13 @@ def connect(icon=None, exact_mode=None):
                     break
             if country_id == None:
                 errorMessage("Unable to get NordVPN country ID.")
-                mark_not_connected(icon)
+                mark_not_connected()
                 set_icon("error.ico")
                 return
             all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers/recommendations?&filters[country_id]={country_id}&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
                 errorMessage("Unable to get NordVPN server recommendations.")
-                mark_not_connected(icon)
+                mark_not_connected()
                 set_icon("error.ico")
                 return
             all_server_recommendations = all_server_recommendations.json
@@ -689,7 +692,7 @@ def connect(icon=None, exact_mode=None):
             city_list_path = os.path.join(app_data_path, "NordCityCache.json")
             if not os.path.exists(city_list_path):
                 errorMessage("Unable to find NordVPN city list.")
-                mark_not_connected(icon)
+                mark_not_connected()
                 set_icon("error.ico")
                 return
             with open(city_list_path, "r") as f: city_list = json.load(f)
@@ -700,13 +703,13 @@ def connect(icon=None, exact_mode=None):
                     break
             if city_id == None:
                 errorMessage("Unable to get NordVPN city ID.")
-                mark_not_connected(icon)
+                mark_not_connected()
                 set_icon("error.ico")
                 return
             all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers/recommendations?&filters[country_city_id]={city_id}&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
                 errorMessage("Unable to get NordVPN server recommendations.")
-                mark_not_connected(icon)
+                mark_not_connected()
                 set_icon("error.ico")
                 return
             all_server_recommendations = all_server_recommendations.json
@@ -714,7 +717,7 @@ def connect(icon=None, exact_mode=None):
             server_list_path = os.path.join(app_data_path, "NordServerIDCache.json")
             if not os.path.exists(server_list_path):
                 errorMessage("Unable to find NordVPN server list.")
-                mark_not_connected(icon)
+                mark_not_connected()
                 set_icon("error.ico")
                 return
             with open(server_list_path, "r") as f: server_id_list = json.load(f)
@@ -723,27 +726,27 @@ def connect(icon=None, exact_mode=None):
                 all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers?&filters[servers.id]={server_id}&limit=1")
                 if not all_server_recommendations.ok:
                     errorMessage("Unable to get NordVPN server recommendations.")
-                    mark_not_connected(icon)
+                    mark_not_connected()
                     set_icon("error.ico")
                     return
                 all_server_recommendations = all_server_recommendations.json
             else:
                 errorMessage("Unable to find NordVPN server.")
-                mark_not_connected(icon)
+                mark_not_connected()
                 set_icon("error.ico")
                 return
         else:
             all_server_recommendations = requests.get("https://api.nordvpn.com/v1/servers/recommendations?&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
                 errorMessage("Unable to get NordVPN server recommendations.")
-                mark_not_connected(icon)
+                mark_not_connected()
                 set_icon("error.ico")
                 return
             all_server_recommendations = all_server_recommendations.json
         mainMessage(f"Loaded {len(all_server_recommendations)} NordVPN server recommendation(s).")
 
         # Stop Wireguard Service
-        disconnect(icon, only_disconnect=True)
+        disconnect(only_disconnect=True)
 
         # Block Instances of IPv6
         mainMessage("Blocking Public IPv6 Addresses...")
@@ -799,7 +802,7 @@ PersistentKeepalive = 25"""
                     break
                 else: 
                     send_command(f"uninstall-wire-tunnel {shortened_name}.{city_name}")
-                    disconnect(icon, only_disconnect=True)
+                    disconnect(only_disconnect=True)
                     continue
             else:
                 errorMessage(f"Failed to add WireGuard configuration for server: {s['name']}")
@@ -824,15 +827,15 @@ PersistentKeepalive = 25"""
             needing_state()
         else:
             errorMessage("Unable to connect to a NordVPN server.")
-            mark_not_connected(icon)
+            mark_not_connected()
             set_icon("error.ico")
             return
     except Exception as e:
         errorMessage(f"Unable to connect to a NordVPN server due to an error: {str(e)}.")
-        mark_not_connected(icon)
+        mark_not_connected()
         set_icon("error.ico")
         return
-def disconnect(icon=None, only_disconnect=False):
+def disconnect(only_disconnect: bool=False):
     mainMessage("Disconnecting Wireguard..")
     if session_data["connected"] == True:
         server_name = session_data["server"]["name"].replace(" ", "").replace("#", "")
@@ -848,10 +851,10 @@ def disconnect(icon=None, only_disconnect=False):
     send_command("end-wireguard-tunnels")
     send_command("unlock-public-ipv6")
     return send_command("end-wireguard")
-def brute_end_wireguard(icon=None):
-    disconnect(icon)
-    mark_not_connected(icon)
-def handle_stat_thread(icon):
+def brute_end_wireguard():
+    disconnect()
+    mark_not_connected()
+def handle_stat_thread():
     count = 0
     since_connected = 0
     while True:
@@ -862,7 +865,7 @@ def handle_stat_thread(icon):
                 since_connected += 1
                 if count % 10 == 0 and config_data.get("loss_connect_protection", True) == True and not tunnel_check() and not session_data["connection_text"].startswith("Connecting"):
                     mainMessage("Reconnecting due to loss of connection.")
-                    differ_from_status_action2(icon)
+                    differ_from_status_action2()
                     continue
                 if count % 20 == 0:
                     server_id = session_data["server"]["id"]
@@ -876,14 +879,14 @@ def handle_stat_thread(icon):
                     session_data["current_load"] = found_server["load"] if found_server else session_data["current_load"]
                     if check_load_swapping() and session_data["current_load"] > 50:
                         mainMessage("Reconnecting due to load > 50%..")
-                        differ_from_status_action2(icon)
+                        differ_from_status_action2()
                 session_data["session_time"] = since_connected
                 update_tray()
             else:
                 count = 0
                 since_connected = 0
         except Exception: pass
-def tunnel_check(timeout=5): return requests.get_if_connected(server="1.1.1.1", timeout=timeout)
+def tunnel_check(timeout: int=5): return requests.get_if_connected(server="1.1.1.1", timeout=timeout)
 
 # Main Runtime
 def app():
@@ -960,8 +963,8 @@ def app():
     # Create Tray App
     try:
         mainMessage("Creating Tray App..")
-        def create_mini_func(func, connected=False):
-            def a(icon, item): addToThread(func, (pystray_icon,), connection=False)
+        def create_mini_func(func: typing.Callable, connected: bool=False):
+            def a(icon: Icon, item: MenuItem): addToThread(func, (), connection=False)
             return a
         image = getImageObj(os.path.join(program_files, "resources", "app_icon.ico"))
         pystray_icon = pystray.Icon(
@@ -970,34 +973,34 @@ def app():
             "NordWireConnect",
             menu=pystray.Menu(
                 pystray.MenuItem("NordWireConnect", lambda icon, item: None, enabled=False),
-                pystray.MenuItem(differ_to_status, lambda icon, item: None, enabled=False),
-                pystray.MenuItem(differ_to_status1, lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
-                pystray.MenuItem(differ_to_status2, lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
-                pystray.MenuItem(differ_to_status3, lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
-                pystray.MenuItem(differ_to_status4, lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
-                pystray.MenuItem(differ_to_status5, lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
+                pystray.MenuItem(unicon(differ_to_status), lambda icon, item: None, enabled=False),
+                pystray.MenuItem(unicon(differ_to_status1), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
+                pystray.MenuItem(unicon(differ_to_status2), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
+                pystray.MenuItem(unicon(differ_to_status3), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
+                pystray.MenuItem(unicon(differ_to_status4), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
+                pystray.MenuItem(unicon(differ_to_status5), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem(differ_from_status_text, create_mini_func(differ_from_status_action, connected=True)),
+                pystray.MenuItem(unicon(differ_from_status_text), create_mini_func(differ_from_status_action, connected=True)),
                 pystray.MenuItem("Reconnect Servers", create_mini_func(differ_from_status_action2, connected=True), visible=lambda icon: session_data["connected"] == True),
-                pystray.MenuItem("Servers", lambda icon, item: ROOT.after(0, connect_selected_server_button, icon)),
+                pystray.MenuItem("Servers", lambda icon, item: ROOT.after(0, connect_selected_server_button)),
                 pystray.MenuItem("Configuration", pystray.Menu(
-                    pystray.MenuItem(differ_to_config1, lambda icon, item: None, enabled=False),
-                    pystray.MenuItem(differ_to_config2, lambda icon, item: None, enabled=False),
+                    pystray.MenuItem(unicon(differ_to_config1), lambda icon, item: None, enabled=False),
+                    pystray.MenuItem(unicon(differ_to_config2), lambda icon, item: None, enabled=False),
                     pystray.Menu.SEPARATOR,
-                    pystray.MenuItem("Change DNS Servers", lambda icon, item: ROOT.after(0, change_dns, icon)),
-                    pystray.MenuItem("Change Access Token", lambda icon, item: ROOT.after(0, change_access_token, icon)),
-                    pystray.MenuItem(differ_to_config3, lambda icon, item: ROOT.after(0, save_auto_selected_server_button, icon)),
+                    pystray.MenuItem("Change DNS Servers", lambda icon, item: ROOT.after(0, change_dns)),
+                    pystray.MenuItem("Change Access Token", lambda icon, item: ROOT.after(0, change_access_token)),
+                    pystray.MenuItem(unicon(differ_to_config3), lambda icon, item: ROOT.after(0, save_auto_selected_server_button)),
                     pystray.MenuItem("Set Shortcuts", create_mini_func(setup_shortcuts)),
                     pystray.MenuItem("Brute End Wireguard", create_mini_func(brute_end_wireguard)),
-                    pystray.MenuItem("Load Swapping", change_load_swapping, checked=check_load_swapping, radio=True),
-                    pystray.MenuItem("Auto Reconnect", change_auto_connect, checked=check_auto_connect, radio=True),
-                    pystray.MenuItem("Notifications", change_notifications, checked=check_notifications, radio=True),
-                    pystray.MenuItem("Optimize Server List", change_server_list, checked=check_server_list, radio=True),
-                    pystray.MenuItem("Split Private LAN Routing", change_split_lan_routing, checked=check_split_lan_routing, radio=True),
-                    pystray.MenuItem("Loss Connect Protection", change_loss_connect_protection, checked=check_loss_connect_protection, radio=True),
+                    pystray.MenuItem("Load Swapping", unicon(change_load_swapping), checked=unicon(check_load_swapping), radio=True),
+                    pystray.MenuItem("Auto Reconnect", unicon(change_auto_connect), checked=unicon(check_auto_connect), radio=True),
+                    pystray.MenuItem("Notifications", unicon(change_notifications), checked=unicon(check_notifications), radio=True),
+                    pystray.MenuItem("Optimize Server List", unicon(change_server_list), checked=unicon(check_server_list), radio=True),
+                    pystray.MenuItem("Split Private LAN Routing", unicon(change_split_lan_routing), checked=unicon(check_split_lan_routing), radio=True),
+                    pystray.MenuItem("Loss Connect Protection", unicon(change_loss_connect_protection), checked=unicon(check_loss_connect_protection), radio=True),
                 )),
-                pystray.MenuItem("About NordWireConnect", about),
-                pystray.MenuItem("Quit", quit_app)
+                pystray.MenuItem("About NordWireConnect", unicon(about)),
+                pystray.MenuItem("Quit", unicon(quit_app))
             )
         )
     except Exception as e: errorMessage(f"Unable to run app. Exception: {str(e)}"); sys.exit(1); return
@@ -1007,10 +1010,10 @@ def app():
         mainMessage("Finishing app load!")
         addToThread(connect_session, (), connection=True)
         threading.Thread(target=worker, daemon=True).start()
-        threading.Thread(target=handle_stat_thread, args=[pystray_icon], daemon=True).start()
+        threading.Thread(target=handle_stat_thread, daemon=True).start()
         ROOT.after(100, check_stop_flag)
         ROOT.iconphoto(True, tk.PhotoImage(file=os.path.join(program_files, "resources", "app_icon.png"))) 
-        pystray_icon.run_detached(setup)
+        pystray_icon.run_detached(unicon(setup))
         tk.mainloop()
     except Exception as e: errorMessage(f"Unable to run app. Exception: {str(e)}"); sys.exit(1); return
 if __name__ == "__main__": app()
