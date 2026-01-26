@@ -199,6 +199,13 @@ class NordWireService(win32serviceutil.ServiceFramework):
             elif command.startswith("cleared-older-version"):
                 if self.cleared_older: return "0"
                 else: return "1"
+            elif command == "wireguard-check":
+                wg_check = subprocess.run([os.path.join(wireguard_location, "wg.exe"), "show"], capture_output=True, text=True)
+                output = wg_check.stdout.strip()
+                if not output: return "1"
+                elif "latest handshake: never" in output.lower(): return "1"
+                elif "latest handshake" in output.lower(): return "0"
+                else: return "1"
             elif command == "connection-status":
                 if self.connected_tunnel: return self.connected_tunnel
                 else: return "NotConnected"

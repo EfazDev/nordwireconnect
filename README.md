@@ -16,7 +16,7 @@ NordWireConnect and Wireguard will require Administrator permissions before inst
 - Auto Reconnect (similar to Wireguard where if you restart while connected, you reconnect again after reboot)
 - Load Swapping (If load is more than or equal to 50%, reconnect servers)
 - Optimize Server List (Load only 500 servers on the Server dropdown menu instead of all 8000+ servers)
-- Loss Connect Protection (Auto Reconnect if connection was lost by Wireguard, does not check if VPN connected)
+- Loss Connect Protection (Auto Reconnect if connection was lost by Wireguard)
 - Set Shortcuts (Creates Desktop Shortcuts)
 - Brute End Wireguard (As a last resort, if Wireguard breaks, you can force end the process.)
 

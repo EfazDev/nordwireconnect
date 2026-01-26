@@ -10,6 +10,7 @@ import os
 import sys
 import json
 import time
+import random
 import ctypes
 import typing
 import PyKits
@@ -55,7 +56,8 @@ config_data = {
     "default_location": "auto",
     "load_swapping": False,
     "split_lan_routing": False,
-    "loss_connect_protection": True
+    "loss_connect_protection": True,
+    "connection_channel": None
 }
 session_data = {
     "connected": False,
@@ -68,7 +70,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.1.5"
+version = "1.2.0"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = tk.Tk()
 Icon = pystray.Icon
@@ -449,6 +451,17 @@ def change_access_token():
             update_tray()
         else: errorMessage("The provided NordVPN Access Token is invalid.")
     else: errorMessage("The provided NordVPN Access Token is invalid.")
+def change_connection_channel():
+    inputted = simpledialog.askstring(title="Connection Channel Input", prompt="Enter the Connection Channel you would like to assign this computer (1-10):")
+    try:
+        inputted = int(inputted)
+        if inputted > 1 and inputted <= 10:
+            config_data["connection_channel"] = inputted
+            successMessageBox(f"Successfully changed Connection Channel to {inputted}!", "NordWireConnect")
+            save_configuration()
+            update_tray()
+        else: errorMessage("The given channel number is not in range from 1 to 10.")
+    except Exception as e: errorMessage("The given channel number is invalid.")
 def default_location(server_name: str, exact_mode: str=None): 
     if exact_mode: config_data["default_location"] = f"{exact_mode}_{server_name}"
     else: config_data["default_location"] = server_name
@@ -543,7 +556,8 @@ def differ_to_status5() -> str:
     else: return "Session Time: N/A"
 def differ_to_config1() -> str: return f"DNS Servers: {config_data['dns']}"
 def differ_to_config2() -> str: return f"Account: {config_data.get('username', 'N/A')} (Token {len(config_data['access_token']) > 60 and 'Given' or 'Ungiven'})"
-def differ_to_config3() -> str: 
+def differ_to_config3() -> str: return f"Connection Channel: {config_data.get('connection_channel', 'N/A')}"
+def differ_to_config4() -> str: 
     if config_data.get("default_location") and config_data["default_location"].lower() != "auto":
         _, server_loc = config_data["default_location"].split("_")
         return f"Default Location: {server_loc}"
@@ -743,6 +757,12 @@ def connect(exact_mode: str=None):
                 set_icon("error.ico")
                 return
             all_server_recommendations = all_server_recommendations.json
+        ind = 0
+        channeled_list = []
+        for s in all_server_recommendations:
+            if (ind % 10) + 1 == config_data.get("connection_channel", 1): channeled_list.append(s)
+            ind += 1
+        all_server_recommendations = channeled_list
         mainMessage(f"Loaded {len(all_server_recommendations)} NordVPN server recommendation(s).")
 
         # Start Finding Servers
@@ -859,6 +879,10 @@ def handle_stat_thread():
                     mainMessage("Reconnecting due to loss of connection.")
                     differ_from_status_action2()
                     continue
+                if config_data.get("loss_connect_protection", True) == True and send_command("wireguard-check") == "1" and not session_data["connection_text"].startswith("Connecting"):
+                    mainMessage("Reconnecting due to loss of VPN.")
+                    differ_from_status_action2()
+                    continue
                 if count % 20 == 0:
                     server_id = session_data["server"]["id"]
                     servers = requests.get(f"https://api.nordvpn.com/v1/servers?&filters[servers.id]={server_id}&limit=1")
@@ -945,6 +969,9 @@ def app():
             errorMessage(f"Unable to get NordVPN credentials. Exception: {str(e)}")
             sys.exit(1)
             return
+    if not config_data.get("connection_channel"):
+        config_data["connection_channel"] = random.randint(1, 10)
+        save_configuration()
     
     # Load Servers
     try:
@@ -978,10 +1005,12 @@ def app():
                 pystray.MenuItem("Configuration", pystray.Menu(
                     pystray.MenuItem(unicon(differ_to_config1), lambda icon, item: None, enabled=False),
                     pystray.MenuItem(unicon(differ_to_config2), lambda icon, item: None, enabled=False),
+                    pystray.MenuItem(unicon(differ_to_config3), lambda icon, item: None, enabled=False),
                     pystray.Menu.SEPARATOR,
                     pystray.MenuItem("Change DNS Servers", lambda icon, item: tk_root.after(0, change_dns)),
                     pystray.MenuItem("Change Access Token", lambda icon, item: tk_root.after(0, change_access_token)),
-                    pystray.MenuItem(unicon(differ_to_config3), lambda icon, item: tk_root.after(0, save_auto_selected_server_button)),
+                    pystray.MenuItem("Change Connection Channel", lambda icon, item: tk_root.after(0, change_connection_channel)),
+                    pystray.MenuItem(unicon(differ_to_config4), lambda icon, item: tk_root.after(0, save_auto_selected_server_button)),
                     pystray.MenuItem("Set Shortcuts", create_mini_func(setup_shortcuts)),
                     pystray.MenuItem("Brute End Wireguard", create_mini_func(brute_end_wireguard)),
                     pystray.MenuItem("Load Swapping", unicon(change_load_swapping), checked=unicon(check_load_swapping), radio=True),
