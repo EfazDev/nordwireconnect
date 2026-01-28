@@ -3,7 +3,7 @@
 
 ## Disclaimer
 > [!IMPORTANT]
-> NordWireConnect is an app that is not made by NordVPN themselves. Using this app will lack features that the main app may have. Please consider using the official app from [NordVPN](https://nordvpn.com/download/windows/) before trying this!
+> NordWireConnect is an app that is not made by NordVPN themselves and uses an unofficial method of connecting. Using this app will lack features that the main app may have. Please consider using the official app from [NordVPN](https://nordvpn.com/download/windows/) before trying this!
 
 ## What is NordWireConnect?
 NordWireConnect is a Python application where you can connect to NordVPN using the official Wireguard app without using the NordVPN app. This may be useful due to startup issues in the NordVPN app and you can't get the most suggested server in the original Wireguard app.
