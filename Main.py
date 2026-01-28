@@ -31,7 +31,7 @@ import tkinter as tk
 from PIL import Image # type: ignore
 import win32com.client # type: ignore
 from queue import Queue
-from tkinter import simpledialog
+from tkinter import simpledialog, messagebox
 import win32com.shell.shell as winshell # type: ignore
 
 # Variables
@@ -57,7 +57,8 @@ config_data = {
     "load_swapping": False,
     "split_lan_routing": False,
     "loss_connect_protection": True,
-    "connection_channel": None
+    "connection_channel": None,
+    "check_for_updates": True
 }
 session_data = {
     "connected": False,
@@ -82,7 +83,7 @@ def mainMessage(message: str): colors_class.print(message, 15)
 def errorMessage(message: str, title: str="Uh oh!"): 
     colors_class.print(message, 9)
     message = message[:256]
-    if config_data.get("notifications"): notification(title, message, img=os.path.join(program_files, "resources", "error.ico"))
+    if config_data.get("notifications"): notification(title, message)
     else:
         if title == "": title = "NordWireConnect"
         elif title != "NordWireConnect": title = f"NordWireConnect: {title}"
@@ -92,7 +93,7 @@ def warnMessage(message: str): colors_class.print(message, 11)
 def successMessage(message: str): colors_class.print(message, 10)
 def successMessageBox(message: str, title: str="Success!"):
     message = message[:256]
-    if config_data.get("notifications"): notification(title, message, img=os.path.join(program_files, "resources", "connected.ico"))
+    if config_data.get("notifications"): notification(title, message)
     else:
         if title == "": title = "NordWireConnect"
         elif title != "NordWireConnect": title = f"NordWireConnect: {title}"
@@ -130,7 +131,7 @@ def unicon(function: typing.Callable, args: typing.Iterable=[]) -> typing.Callab
 def getImageObj(img: str=None) -> Image.Image:
     try: return Image.open(img)
     except Exception: return Image.new("RGB", (64, 64), color = 'blue')
-def notification(title: str, message: str, img: str=None):
+def notification(title: str, message: str):
     def a():
         if pystray_icon: pystray_icon.notify(message, title)
     addToThread(a, ())
@@ -365,6 +366,48 @@ def worker():
         try: func(*args)
         except Exception as e: errorMessage(f"Error while running worker ({getattr(func, "__name__")}): {str(e)}")
         finally: work_queue.task_done()
+def get_latest_version() -> dict:
+    if tunnel_check(timeout=1):
+        latest_version = requests.get("https://raw.githubusercontent.com/EfazDev/nordwireconnect/refs/heads/main/Version.json")
+        if latest_version.ok: return latest_version.json
+def auto_check_for_updates():
+    latest_version = get_latest_version()
+    if latest_version and latest_version["version"] > version: 
+        notification("Update Available!", f"NordWireConnect v{latest_version['version']} is now available for download!")
+def tkinter_install_updates(latest_ver: str):
+    try:
+        confirmed = messagebox.askyesno("Update Available!", f"NordWireConnect v{latest_ver} is now available to be downloaded from GitHub!\nDo you wish to proceed?", icon="info")
+        if confirmed:
+            installer_path = os.path.join(app_data_path, "NordWireConnectInstaller.exe")
+            download_progress = requests.download(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe", installer_path)
+            if download_progress.ok:
+                ctypes.windll.shell32.ShellExecuteW(
+                    None,
+                    "runas",
+                    installer_path,
+                    "",
+                    None,
+                    1
+                )
+                quit_app()
+                sys.exit(0)
+            else: 
+                if os.path.exists(installer_path): os.remove(installer_path)
+                errorMessage("Unable to download NordWireConnectInstaller from GitHub!")
+    except Exception as e: errorMessage(f"Unable to check for new updates due to an exception: {str(e)}")
+def check_for_updates():
+    try:
+        latest_version = get_latest_version()
+        if not latest_version:
+            errorMessage("Unable to check for new updates! Check your internet connection..")
+            return
+        if latest_version["version"] > version: 
+            latest_ver = latest_version["version"]
+            test_available = requests.head(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe")
+            if not test_available.ok: errorMessage("I'm sorry! The latest version is currently unavailable to be downloaded. Please check back later!")
+            tk_root.after(100, tkinter_install_updates, latest_ver)
+        else: errorMessage("You're already on the latest version of NordWireConnect!")
+    except Exception as e: errorMessage(f"Unable to check for new updates due to an exception: {str(e)}")
 
 # Data Handling
 def session_data_modified():
@@ -499,6 +542,11 @@ def change_server_list():
     save_configuration()
     update_tray()
 def check_server_list(): return config_data.get("optimize_server_list", False) == True
+def change_autoupdates():
+    config_data["check_for_updates"] = not config_data.get("check_for_updates", True)
+    save_configuration()
+    update_tray()
+def check_autoupdates(): return config_data.get("check_for_updates", True) == True
 def change_split_lan_routing():
     config_data["split_lan_routing"] = not config_data.get("split_lan_routing", False)
     save_configuration()
@@ -1023,10 +1071,12 @@ def app():
                     pystray.MenuItem("Auto Reconnect", unicon(change_auto_connect), checked=unicon(check_auto_connect), radio=True),
                     pystray.MenuItem("Notifications", unicon(change_notifications), checked=unicon(check_notifications), radio=True),
                     pystray.MenuItem("Optimize Server List", unicon(change_server_list), checked=unicon(check_server_list), radio=True),
+                    pystray.MenuItem("Auto Check for Updates", unicon(change_autoupdates), checked=unicon(check_autoupdates), radio=True),
                     pystray.MenuItem("Split Private LAN Routing", unicon(change_split_lan_routing), checked=unicon(check_split_lan_routing), radio=True),
                     pystray.MenuItem("Loss Connect Protection", unicon(change_loss_connect_protection), checked=unicon(check_loss_connect_protection), radio=True),
                 )),
                 pystray.MenuItem("About NordWireConnect", unicon(about)),
+                pystray.MenuItem("Check for Updates", unicon(check_for_updates)),
                 pystray.MenuItem("Quit", unicon(quit_app))
             )
         )
@@ -1038,6 +1088,7 @@ def app():
         addToThread(connect_session, (), connection=True)
         threading.Thread(target=worker, daemon=True).start()
         threading.Thread(target=handle_stat_thread, daemon=True).start()
+        if config_data.get("check_for_updates", True) == True: threading.Thread(target=auto_check_for_updates, daemon=True).start()
         tk_root.after(100, check_stop_flag)
         tk_root.iconphoto(True, tk.PhotoImage(file=os.path.join(program_files, "resources", "app_icon.png"))) 
         pystray_icon.run_detached(unicon(setup))
