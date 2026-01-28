@@ -29,7 +29,7 @@ pre_program_files = os.getenv("ProgramFiles")
 app_data_path = os.path.join(pip_class.getLocalAppData(), "NordWireConnect")
 program_files = os.path.join(pre_program_files, "NordWireConnect")
 cur_path = os.path.dirname(os.path.abspath(__file__))
-version = "1.2.1"
+version = "1.2.5"
 
 # Logging and Messages
 def systemMessage(message: str): colors_class.print(message, colors_class.hex_to_ansi2("#3E5FFF"))
@@ -133,6 +133,9 @@ def setup_registry():
         win32api.RegSetValueEx(registry_key, "Publisher", 0, win32con.REG_SZ, "EfazDev")
         win32api.RegSetValueEx(registry_key, "EstimatedSize", 0, win32con.REG_DWORD, min(get_folder_size(program_files, formatWithAbbreviation=False) // 1024, 0xFFFFFFFF))
         win32api.RegCloseKey(registry_key)
+        wireguard_key = win32api.RegCreateKey(win32con.HKEY_LOCAL_MACHINE, r"SOFTWARE\WireGuard")
+        win32api.RegSetValueEx(wireguard_key, "DangerousScriptExecution", 0, win32con.REG_DWORD, 1)
+        win32api.RegCloseKey(wireguard_key)
     except Exception as e: errorMessage(f"Unable to setup registry: {str(e)}")
 def format_size(size_bytes: int) -> str:
     if size_bytes == 0: return "0 Bytes"

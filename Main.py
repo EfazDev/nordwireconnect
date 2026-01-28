@@ -71,11 +71,12 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.2.1"
+version = "1.2.5"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = tk.Tk()
 Icon = pystray.Icon
 MenuItem = pystray.MenuItem
+server_filter = "&filters[servers.status]=online&fields[servers.id]&fields[servers.name]&fields[servers.hostname]&fields[servers.station]&fields[servers.status]&fields[servers.load]&fields[servers.created_at]&fields[servers.groups.id]&fields[servers.groups.title]&fields[servers.technologies.id]&fields[servers.technologies.metadata]&fields[servers.technologies.pivot.status]&fields[servers.specifications.identifier]&fields[servers.specifications.values.value]&fields[servers.locations.country.name]&fields[servers.locations.country.code]&fields[servers.locations.country.city.name]&fields[servers.locations.country.city.latitude]&fields[servers.locations.country.city.longitude]&fields[servers.locations.country.city.hub_score]&fields[servers.ips]"
 
 # Logging and Messages
 def systemMessage(message: str): colors_class.print(message, colors_class.hex_to_ansi2("#3E5FFF"))
@@ -184,7 +185,7 @@ def select_server_list(message: str="Please select a server!") -> typing.Union[N
         virutal_location = get_if_virtual_location(s)
         wireguard_metadata = None
         for m in s.get("technologies", []):
-            if m.get("identifier") == "wireguard_udp":
+            if m.get("id") == 35:
                 wireguard_metadata = m.get("metadata", {})
                 break
         if not wireguard_metadata:
@@ -415,7 +416,7 @@ def session_data_modified():
 def run_cache():
     mainMessage("Updating NordVPN server cache..")
     while not tunnel_check(timeout=1): time.sleep(0.1)
-    all_servers = requests.get("https://api.nordvpn.com/v1/servers/recommendations?&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=10000")
+    all_servers = requests.get(f"https://api.nordvpn.com/v1/servers/recommendations?&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=10000")
     raw_servers = (all_servers.json[:500] if (config_data.get("optimize_server_list", False) == True) else all_servers.json) if all_servers.ok else []
     raw_all_servers = all_servers.json if all_servers.ok else []
     all_cities = {}
@@ -719,7 +720,7 @@ def connect(exact_mode: str=None):
                 return
         should_filter = False
         if config_data["server"] == "auto" or config_data["server"] == None or exact_mode == None:
-            all_server_recommendations = requests.get("https://api.nordvpn.com/v1/servers/recommendations?&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
+            all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers/recommendations?{server_filter}&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
                 errorMessage("Unable to get NordVPN server recommendations.")
                 mark_not_connected()
@@ -745,7 +746,7 @@ def connect(exact_mode: str=None):
                 mark_not_connected()
                 set_icon("error.ico")
                 return
-            all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers/recommendations?&filters[country_id]={country_id}&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
+            all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers/recommendations?{server_filter}&filters[country_id]={country_id}&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
                 errorMessage("Unable to get NordVPN server recommendations.")
                 mark_not_connected()
@@ -771,7 +772,7 @@ def connect(exact_mode: str=None):
                 mark_not_connected()
                 set_icon("error.ico")
                 return
-            all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers/recommendations?&filters[country_city_id]={city_id}&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
+            all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers/recommendations?{server_filter}&filters[country_city_id]={city_id}&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
                 errorMessage("Unable to get NordVPN server recommendations.")
                 mark_not_connected()
@@ -789,7 +790,7 @@ def connect(exact_mode: str=None):
             with open(server_list_path, "r") as f: server_id_list = json.load(f)
             if server_id_list.get(config_data["server"]):
                 server_id = server_id_list.get(config_data["server"])
-                all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers?&filters[servers.id]={server_id}&limit=1")
+                all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers?{server_filter}&filters[servers.id]={server_id}&limit=1")
                 if not all_server_recommendations.ok:
                     errorMessage("Unable to get NordVPN server recommendations.")
                     mark_not_connected()
@@ -802,7 +803,7 @@ def connect(exact_mode: str=None):
                 set_icon("error.ico")
                 return
         else:
-            all_server_recommendations = requests.get("https://api.nordvpn.com/v1/servers/recommendations?&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
+            all_server_recommendations = requests.get(f"https://api.nordvpn.com/v1/servers/recommendations?{server_filter}&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=100")
             if not all_server_recommendations.ok:
                 errorMessage("Unable to get NordVPN server recommendations.")
                 mark_not_connected()
@@ -837,22 +838,24 @@ def connect(exact_mode: str=None):
             mainMessage(f"Attempting connection for: {s['name']}")
             wireguard_metadata = None
             for m in s.get("technologies", []):
-                if m.get("identifier") == "wireguard_udp":
+                if m.get("id") == 35:
                     wireguard_metadata = m.get("metadata", {})
                     break
             if not wireguard_metadata: continue
-            # client_public, preshared = get_client_public_key(private_key)
+            #client_public, preshared = get_client_public_key(private_key)
             configuration = f"""# {shortened_name}.{city_name}.conf
 [Interface]
 PrivateKey = {private_key}
-Address = 10.5.0.2/32
+ListenPort = 51820
 DNS = {config_data.get('dns')}
-MTU = 1380
+Address = 10.5.0.2/16
+PostUp = echo Connected > "{os.path.join(app_data_path, 'ConnectionStatus')}"
+PostDown = echo Disconnected > "{os.path.join(app_data_path, 'ConnectionStatus')}"
 
 [Peer]
 PublicKey = {wireguard_metadata[0].get("value")}
-AllowedIPs = {get_allowed_ips()}
 Endpoint = {s.get('hostname')}:51820
+AllowedIPs = {get_allowed_ips()}
 PersistentKeepalive = 25"""
             config_path = os.path.join(app_data_path, f"{shortened_name}.{city_name}.conf")
             with open(config_path, "w") as f: f.write(configuration)
@@ -929,14 +932,22 @@ def handle_stat_thread():
             if session_data["connected"] == True:
                 count += 1
                 since_connected += 1
-                if count % 10 == 0 and config_data.get("loss_connect_protection", True) == True and not tunnel_check() and not session_data["connection_text"].startswith("Connecting"):
-                    mainMessage("Reconnecting due to loss of connection.")
-                    differ_from_status_action2()
-                    continue
-                if config_data.get("loss_connect_protection", True) == True and send_command("wireguard-check") == "1" and not session_data["connection_text"].startswith("Connecting"):
-                    mainMessage("Reconnecting due to loss of VPN.")
-                    differ_from_status_action2()
-                    continue
+                if config_data.get("loss_connect_protection", True) == True:
+                    if count % 10 == 0 and not tunnel_check() and not session_data["connection_text"].startswith("Connecting"):
+                        mainMessage("Reconnecting due to loss of connection.")
+                        differ_from_status_action2()
+                        continue
+                    if send_command("wireguard-check") == "1" and not session_data["connection_text"].startswith("Connecting"):
+                        mainMessage("Reconnecting due to loss of VPN.")
+                        differ_from_status_action2()
+                        continue
+                    if os.path.exists(os.path.join(app_data_path, "ConnectionStatus")):
+                        with open(os.path.join(app_data_path, "ConnectionStatus"), "r") as f: status = f.read().strip()
+                        if status == "Disconnected" and not session_data["connection_text"].startswith("Connecting"):
+                            mainMessage("Reconnecting due to loss of VPN.")
+                            differ_from_status_action2()
+                            continue
+
                 if count % 20 == 0:
                     server_id = session_data["server"]["id"]
                     servers = requests.get(f"https://api.nordvpn.com/v1/servers?&filters[servers.id]={server_id}&limit=1")
