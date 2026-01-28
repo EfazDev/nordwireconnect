@@ -1903,7 +1903,7 @@ class pip:
             return s
     def getPathFile(self, file: str, name: str=""):
         if self._os.path.exists(file): return file
-        elif not name: return self._shutil.which(self._os.basename(file).replace(".exe", "")) if self._os.basename(file).endswith(".exe") else self._shutil.which(self._os.basename(file))
+        elif not name: return self._shutil.which(self._os.path.basename(file).replace(".exe", "")) if self._os.path.basename(file).endswith(".exe") else self._shutil.which(self._os.path.basename(file))
         else: return self._shutil.which(name)
     def copyTreeWithMetadata(self, src: str, dst: str, symlinks=False, ignore=None, dirs_exist_ok=False, ignore_if_not_exist=False):
         if not self._os.path.exists(src) and ignore_if_not_exist == False: return
