@@ -10,6 +10,7 @@ import os
 import sys
 import json
 import time
+import zlib
 import random
 import ctypes
 import typing
@@ -71,7 +72,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.2.5"
+version = "1.2.6"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = tk.Tk()
 Icon = pystray.Icon
@@ -616,6 +617,7 @@ def differ_to_config4() -> str:
 def get_allowed_ips() -> str: 
     if config_data.get("split_lan_routing"): return "0.0.0.0/5, 8.0.0.0/7, 11.0.0.0/8, 12.0.0.0/6, 16.0.0.0/4, 32.0.0.0/3, 64.0.0.0/2, 128.0.0.0/3, 160.0.0.0/5, 168.0.0.0/6, 172.0.0.0/12, 172.32.0.0/11, 172.64.0.0/10, 172.128.0.0/9, 173.0.0.0/8, 174.0.0.0/7, 176.0.0.0/4, 192.0.0.0/9, 192.128.0.0/11, 192.160.0.0/13, 192.169.0.0/16, 192.170.0.0/15, 192.172.0.0/14, 192.176.0.0/12, 192.192.0.0/10, 193.0.0.0/8, 194.0.0.0/7, 196.0.0.0/6, 200.0.0.0/5, 208.0.0.0/4, ::/1, 8000::/2, c000::/3, e000::/4, f000::/5, f800::/6, fe00::/9, ff00::/8"
     else: return "0.0.0.0/0, ::/0"
+def convert_to_channel(hostname: str) -> int: return ((zlib.crc32(hostname.encode("utf-8")) & 0xffffffff) % 10) + 1
 def connect_server(server_name: str, exact_mode: str=None):
     config_data["server"] = server_name
     try: connect(exact_mode=exact_mode)
@@ -815,7 +817,7 @@ def connect(exact_mode: str=None):
             ind = 0
             channeled_list = []
             for s in all_server_recommendations:
-                if (ind % 10) + 1 == config_data.get("connection_channel", 1): channeled_list.append(s)
+                if convert_to_channel(s["hostname"]) == config_data.get("connection_channel", 1): channeled_list.append(s)
                 ind += 1
             all_server_recommendations = channeled_list
         mainMessage(f"Loaded {len(all_server_recommendations)} NordVPN server recommendation(s).")
@@ -856,7 +858,7 @@ PostDown = echo Disconnected > "{os.path.join(app_data_path, 'ConnectionStatus')
 PublicKey = {wireguard_metadata[0].get("value")}
 Endpoint = {s.get('hostname')}:51820
 AllowedIPs = {get_allowed_ips()}
-PersistentKeepalive = 25"""
+PersistentKeepalive = 10"""
             config_path = os.path.join(app_data_path, f"{shortened_name}.{city_name}.conf")
             with open(config_path, "w") as f: f.write(configuration)
             if session_data["connection_text"] == "Not Connected" and session_data["connected"] == False: break
