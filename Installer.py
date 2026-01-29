@@ -90,8 +90,8 @@ def install():
             return
         mainMessage("Installing NordWireConnect..")
         os.makedirs(program_files, exist_ok=True)
-        if os.path.exists(os.path.join(cur_path, "NordSessionData.json")): shutil.copy(os.path.join(cur_path, "NordSessionData.json"), os.path.join(app_data_path, "NordSessionData.json"))
-        if os.path.exists(os.path.join(cur_path, "ConnectConfig.json")): shutil.copy(os.path.join(cur_path, "ConnectConfig.json"), os.path.join(app_data_path, "ConnectConfig.json"))
+        if os.path.exists(os.path.join(cur_path, "NordSessionData.json")) and not os.path.samefile(os.path.join(cur_path, "NordSessionData.json"), os.path.join(app_data_path, "NordSessionData.json")): shutil.copy(os.path.join(cur_path, "NordSessionData.json"), os.path.join(app_data_path, "NordSessionData.json"))
+        if os.path.exists(os.path.join(cur_path, "ConnectConfig.json")) and not os.path.samefile(os.path.join(cur_path, "ConnectConfig.json"), os.path.join(app_data_path, "ConnectConfig.json")): shutil.copy(os.path.join(cur_path, "ConnectConfig.json"), os.path.join(app_data_path, "ConnectConfig.json"))
         shutil.copytree(os.path.join(os.path.dirname(__file__), "resources"), os.path.join(program_files, "resources"), dirs_exist_ok=True) 
         subprocess.run("taskkill /IM NordWireConnect.exe /F", shell=True)
         time.sleep(3)
