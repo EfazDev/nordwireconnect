@@ -49,6 +49,9 @@ private_key = None
 config_data = {
     "access_token": "",
     "username": "",
+    "openvpn_username": "",
+    "openvpn_password": "",
+    "nordvpn_email": "",
     "dns": "103.86.96.100, 103.86.99.100", # NordVPN DNS
     "server": "auto",
     "auto_connect": True,
@@ -59,7 +62,27 @@ config_data = {
     "split_lan_routing": False,
     "loss_connect_protection": True,
     "connection_channel": None,
-    "check_for_updates": True
+    "check_for_updates": True,
+    "beta_updates": False
+}
+config_data_type_allowed = {
+    "access_token": typing.Union[str, None],
+    "username": typing.Union[str, None],
+    "openvpn_username": typing.Union[str, None],
+    "openvpn_password": typing.Union[str, None],
+    "nordvpn_email": typing.Union[str, None],
+    "dns": str,
+    "server": typing.Union[str, None],
+    "auto_connect": bool,
+    "notifications": bool,
+    "optimize_server_list": bool,
+    "default_location": typing.Union[str, None],
+    "load_swapping": bool,
+    "split_lan_routing": bool,
+    "loss_connect_protection": bool,
+    "connection_channel": typing.Union[int, None],
+    "check_for_updates": bool,
+    "beta_updates": bool
 }
 session_data = {
     "connected": False,
@@ -72,7 +95,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.2.6"
+version = "1.2.7"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = tk.Tk()
 Icon = pystray.Icon
@@ -371,7 +394,10 @@ def worker():
 def get_latest_version() -> dict:
     if tunnel_check(timeout=1):
         latest_version = requests.get("https://raw.githubusercontent.com/EfazDev/nordwireconnect/refs/heads/main/Version.json")
-        if latest_version.ok: return latest_version.json
+        if latest_version.ok: 
+            res = latest_version.json
+            for v in res.get("versions", []):
+                if v.get("version") and v.get("beta", False) == config_data.get("beta_updates", False): return v
 def auto_check_for_updates():
     latest_version = get_latest_version()
     if latest_version and latest_version["version"] > version: 
@@ -410,6 +436,27 @@ def check_for_updates():
             tk_root.after(100, tkinter_install_updates, latest_ver)
         else: errorMessage("You're already on the latest version of NordWireConnect!")
     except Exception as e: errorMessage(f"Unable to check for new updates due to an exception: {str(e)}")
+def reset_dns_cache():
+    try:
+        mainMessage("Resetting DNS Cache..")
+        subprocess.run("ipconfig /flushdns", shell=True, check=True)
+        successMessageBox("Successfully reset DNS Cache!", "NordWireConnect")
+    except Exception as e: errorMessage(f"Unable to reset DNS Cache: {str(e)}")
+def reset_windows_networking():
+    try:
+        confirmed = messagebox.askyesno("Reset Windows Networking", f"Are you sure you want to reset Windows Networking?\nThis will require administrator permissions and rebooting.", icon="question")
+        if confirmed:
+            mainMessage("Resetting Windows Networking..")
+            with open(os.path.join(app_data_path, "ResetNetwork.bat"), "w") as f: f.write("@echo off\nnetsh winsock reset\nnetsh int ip reset\nipconfig /release\nipconfig /renew\nipconfig /flushdns\ntimeout 3\nshutdown /f /r /t 0\ntimeout 5")
+            ctypes.windll.shell32.ShellExecuteW(
+                None,
+                "runas",
+                "cmd.exe",
+                f'/c "{os.path.join(app_data_path, "ResetNetwork.bat")}"',
+                None,
+                1
+            )
+    except Exception as e: errorMessage(f"Unable to reset Windows Networking: {str(e)}")
 
 # Data Handling
 def session_data_modified():
@@ -487,18 +534,31 @@ def change_access_token():
     if len(inputted) > 50:
         test_request = requests.get(f"https://api.nordvpn.com/v1/users/services/credentials", auth=["token", inputted])
         if test_request.ok:
-            test_request = test_request.json
-            config_data["username"] = test_request.get("username", "")
-            config_data["access_token"] = inputted
-            private_key = test_request.get("nordlynx_private_key", "")
-            successMessageBox("Successfully changed NordVPN Access Token!", "NordWireConnect")
-            save_configuration()
-            update_tray()
+            test_request2 = requests.get(f"https://api.nordvpn.com/v1/users/current", auth=["token", inputted])
+            if test_request2.ok:
+                test_request = test_request.json
+                test_request2 = test_request2.json
+                config_data["openvpn_username"] = test_request.get("username", "")
+                config_data["openvpn_password"] = test_request.get("password", "")
+                config_data["nordvpn_email"] = test_request2.get("email", "")
+                config_data["username"] = test_request2.get("username", "")
+                config_data["access_token"] = inputted
+                private_key = test_request.get("nordlynx_private_key", "")
+                successMessageBox("Successfully changed NordVPN Access Token!", "NordWireConnect")
+                save_configuration()
+                update_tray()
+            else: errorMessage("The provided NordVPN Access Token is invalid.")
         else: errorMessage("The provided NordVPN Access Token is invalid.")
     else: errorMessage("The provided NordVPN Access Token is invalid.")
 def change_connection_channel():
-    inputted = simpledialog.askstring(title="Connection Channel Input", prompt="Enter the Connection Channel you would like to assign this computer (1-10):")
+    inputted = simpledialog.askstring(title="Connection Channel Input", prompt="Enter the Connection Channel you would like to assign this computer (1-10) (enter \"none\" for no channels):")
     try:
+        if inputted.lower() == "none":
+            config_data["connection_channel"] = None
+            successMessageBox(f"Successfully cleared Connection Channel!", "NordWireConnect")
+            save_configuration()
+            update_tray()
+            return
         inputted = int(inputted)
         if inputted >= 1 and inputted <= 10:
             config_data["connection_channel"] = inputted
@@ -518,6 +578,12 @@ def mark_not_connected():
     session_data["server"] = None
     session_data_modified()
     update_tray()
+def load_configuration():
+    global config_data
+    if os.path.exists(os.path.join(app_data_path, "ConnectConfig.json")):
+        with open(os.path.join(app_data_path, "ConnectConfig.json"), "r") as f: temp_conf = json.load(f)
+        for k, v in temp_conf.items():
+            if isinstance(v, config_data_type_allowed.get(k, typing.Any)): config_data[k] = v
 def save_configuration():
     mainMessage("Saving configuration..")
     with open(os.path.join(app_data_path, "ConnectConfig.json"), "w") as f: json.dump(config_data, f, indent=4)
@@ -560,6 +626,11 @@ def change_loss_connect_protection():
     save_configuration()
     update_tray()
 def check_loss_connect_protection(): return config_data.get("loss_connect_protection", True) == True
+def change_beta_updates():
+    config_data["beta_updates"] = not config_data.get("beta_updates", False)
+    save_configuration()
+    update_tray()
+def check_beta_updates(): return config_data.get("beta_updates", False) == True
 
 # Differenting Status
 def differ_from_status_text() -> str:
@@ -813,7 +884,7 @@ def connect(exact_mode: str=None):
                 return
             all_server_recommendations = all_server_recommendations.json
             should_filter = True
-        if should_filter:
+        if should_filter and config_data.get("connection_channel"):
             ind = 0
             channeled_list = []
             for s in all_server_recommendations:
@@ -1008,8 +1079,7 @@ def app():
     # Load Configuration
     mainMessage("Loading Configuration..")
     try:
-        if os.path.exists(os.path.join(app_data_path, "ConnectConfig.json")):
-            with open(os.path.join(app_data_path, "ConnectConfig.json"), "r") as f: config_data = json.load(f)
+        load_configuration()
         if os.path.exists(os.path.join(app_data_path, "NordSessionData.json")): 
             with open(os.path.join(app_data_path, "NordSessionData.json"), "r") as f: session_data = json.load(f)
     except Exception as e: errorMessage(f"There was an error trying to load configuration: {str(e)}"); sys.exit(1); return
@@ -1036,9 +1106,6 @@ def app():
             errorMessage(f"Unable to get NordVPN credentials. Exception: {str(e)}")
             sys.exit(1)
             return
-    if not config_data.get("connection_channel"):
-        config_data["connection_channel"] = random.randint(1, 10)
-        save_configuration()
     
     # Load Servers
     try:
@@ -1080,6 +1147,9 @@ def app():
                     pystray.MenuItem(unicon(differ_to_config4), lambda icon, item: tk_root.after(0, save_auto_selected_server_button)),
                     pystray.MenuItem("Set Shortcuts", create_mini_func(setup_shortcuts)),
                     pystray.MenuItem("Brute End Wireguard", create_mini_func(brute_end_wireguard)),
+                    pystray.MenuItem("Reset DNS Cache", lambda icon, item: unicon(reset_dns_cache)),
+                    pystray.MenuItem("Reset Windows Networking", lambda icon, item: tk_root.after(0, reset_windows_networking)),
+                    pystray.Menu.SEPARATOR,
                     pystray.MenuItem("Load Swapping", unicon(change_load_swapping), checked=unicon(check_load_swapping), radio=True),
                     pystray.MenuItem("Auto Reconnect", unicon(change_auto_connect), checked=unicon(check_auto_connect), radio=True),
                     pystray.MenuItem("Notifications", unicon(change_notifications), checked=unicon(check_notifications), radio=True),
@@ -1087,6 +1157,7 @@ def app():
                     pystray.MenuItem("Auto Check for Updates", unicon(change_autoupdates), checked=unicon(check_autoupdates), radio=True),
                     pystray.MenuItem("Split Private LAN Routing", unicon(change_split_lan_routing), checked=unicon(check_split_lan_routing), radio=True),
                     pystray.MenuItem("Loss Connect Protection", unicon(change_loss_connect_protection), checked=unicon(check_loss_connect_protection), radio=True),
+                    pystray.MenuItem("Beta Updates", unicon(change_beta_updates), checked=unicon(check_beta_updates), radio=True),
                 )),
                 pystray.MenuItem("About NordWireConnect", unicon(about)),
                 pystray.MenuItem("Check for Updates", unicon(check_for_updates)),

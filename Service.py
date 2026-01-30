@@ -108,11 +108,20 @@ class NordWireService(win32serviceutil.ServiceFramework):
             if command == "end-wireguard-tunnels":
                 kill = shell_run("powershell -Command \"Get-Service WireGuardTunnel* | Stop-Service -Force\"")
                 self.connected_tunnel = None
+                self.handle_command("delete-wireguard-services")
                 return str(kill.returncode)
             elif command == "end-wireguard":
+                self.handle_command("end-wireguard-tunnels")
                 end = shell_run("taskkill /IM wireguard.exe /F")
                 self.connected_tunnel = None
                 return str(end.returncode)
+            elif command == "delete-wireguard-services":
+                for l in subprocess.check_output(["sc", "query", "state=", "all"], text=True).splitlines():
+                    l = l.strip()
+                    if l.startswith("SERVICE_NAME:") and "WireGuardTunnel$" in l:
+                        sn = l.split(": ", 1)[1].strip()
+                        subprocess.run(["sc", "delete", sn], check=True)
+                return "0"
             elif command == "end-wireguard-installer":
                 end = shell_run("taskkill /IM wireguard-installer.exe /F")
                 self.connected_tunnel = None
@@ -134,7 +143,6 @@ class NordWireService(win32serviceutil.ServiceFramework):
                 if len(command) > 1:
                     server_name = " ".join(command[1:])
                     self.handle_command(f"uninstall-wire-tunnel {server_name}")
-                self.handle_command("end-wireguard-tunnels")
                 return self.handle_command("end-wireguard")
             elif command.startswith("reinstall-wire-tunnel"):
                 command = command.split(" ")
