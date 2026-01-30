@@ -583,7 +583,7 @@ def load_configuration():
     if os.path.exists(os.path.join(app_data_path, "ConnectConfig.json")):
         with open(os.path.join(app_data_path, "ConnectConfig.json"), "r") as f: temp_conf = json.load(f)
         for k, v in temp_conf.items():
-            if isinstance(v, config_data_type_allowed.get(k, typing.Any)): config_data[k] = v
+            if isinstance(v, config_data_type_allowed.get(k)): config_data[k] = v
 def save_configuration():
     mainMessage("Saving configuration..")
     with open(os.path.join(app_data_path, "ConnectConfig.json"), "w") as f: json.dump(config_data, f, indent=4)
