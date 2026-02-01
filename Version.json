@@ -6,6 +6,10 @@
             "beta": false
         },
         {
+            "version": "1.2.7",
+            "beta": true
+        },
+        {
             "version": "1.2.6",
             "beta": false
         },
