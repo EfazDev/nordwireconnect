@@ -1,13 +1,17 @@
 {
-    "version": "1.2.7",
+    "version": "1.2.8",
     "versions": [
         {
-            "version": "1.2.7",
+            "version": "1.2.8",
             "beta": false
         },
         {
-            "version": "1.2.7",
+            "version": "1.2.8",
             "beta": true
+        },
+        {
+            "version": "1.2.7",
+            "beta": false
         },
         {
             "version": "1.2.6",

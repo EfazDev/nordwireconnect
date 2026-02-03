@@ -8,6 +8,7 @@ https://www.efaz.dev
 # Modules
 import os
 import time
+import PyKits
 import win32ts # type: ignore
 import win32con # type: ignore
 import win32file # type: ignore
@@ -28,6 +29,7 @@ service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "Main", "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
+pip_class = PyKits.pip()
 
 # Pipe Administration
 def create_pipe_sa():
@@ -74,7 +76,8 @@ def check_for_unbricks(idx: str) -> bool:
 class NordWireService(win32serviceutil.ServiceFramework):
     _svc_name_ = "NordWireConnectService"
     _svc_display_name_ = "NordWireConnectService"
-    _svc_description_ = "Start NordWireConnect on boot and handle administrative commands"
+    _svc_description_ = "Handles NordWireConnect with UI Handling, Background Tasks and WireGuard Management!"
+    _svc_controls_accepted_ = win32service.SERVICE_ACCEPT_POWEREVENT | win32service.SERVICE_ACCEPT_SESSIONCHANGE
     def __init__(self, args):
         super().__init__(args)
         self.stop_event = win32event.CreateEvent(None, 0, 0, None)
@@ -83,6 +86,7 @@ class NordWireService(win32serviceutil.ServiceFramework):
         self.connected_tunnel = None
         self.cached_routing = []
         self.cleared_older = False
+        self.prevent_opening = False
     def SvcStop(self):
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
         win32event.SetEvent(self.stop_event)
@@ -102,6 +106,8 @@ class NordWireService(win32serviceutil.ServiceFramework):
             elif event_type in (win32con.PBT_APMRESUMEAUTOMATIC, win32con.PBT_APMRESUMECRITICAL):
                 servicemanager.LogInfoMsg("System resumed")
                 time.sleep(5)
+                self.ui_running = False
+                self.last_session_id = None
     def handle_command(self, command: str) -> str:
         servicemanager.LogInfoMsg(f"Received command: {command}")
         try:
@@ -122,6 +128,10 @@ class NordWireService(win32serviceutil.ServiceFramework):
                         sn = l.split(": ", 1)[1].strip()
                         subprocess.run(["sc", "delete", sn], check=True)
                 return "0"
+            elif command == "ui-opening":
+                self.prevent_opening = False
+            elif command == "ui-closing":
+                self.prevent_opening = True
             elif command == "end-wireguard-installer":
                 end = shell_run("taskkill /IM wireguard-installer.exe /F")
                 self.connected_tunnel = None
@@ -153,56 +163,32 @@ class NordWireService(win32serviceutil.ServiceFramework):
             elif command.startswith("combined-end-wireguard"):
                 self.handle_command("end-wireguard")
                 return self.handle_command("end-wireguard-installer")
-            elif command.startswith("generate-preshared"):
-                command = command.split(" ")
-                add = subprocess.run([os.path.join(wireguard_location, "wg.exe"), "genpsk"], text=True, capture_output=True)
-                return add.stdout.strip()
-            elif command.startswith("generate-public-key"):
-                command = command.split(" ")
-                private_key = " ".join(command[1:])
-                add = subprocess.run([os.path.join(wireguard_location, "wg.exe"), "pubkey"], text=True, capture_output=True, input=private_key)
-                return add.stdout.strip()
             elif command.startswith("unbrick-adapter"):
                 get_interfaces_req = subprocess.run(
-                    "powershell -NoProfile -Command \"Get-NetRoute -DestinationPrefix 0.0.0.0/0 | Select-Object -ExpandProperty InterfaceIndex\"",
+                    "netsh interface ipv4 show route",
                     shell=True,
                     capture_output=True,
                     text=True
-                )
+                ).stdout + subprocess.run(
+                    "netsh interface ipv6 show route",
+                    shell=True,
+                    capture_output=True,
+                    text=True
+                ).stdout
                 interface_indexes = {
-                    int(line.strip())
-                    for line in get_interfaces_req.stdout.splitlines()
-                    if line.strip().isdigit()
+                    line.split()[-2] for line in get_interfaces_req.splitlines()
+                    if "0.0.0.0/0" in line or "::/0" in line
                 }
                 for idx in interface_indexes:
+                    # Validation
+                    if not idx.isdigit(): continue
+
                     # Should Unbrick?
                     if not check_for_unbricks(idx): continue
                     
                     # Unbrick
                     shell_run(f"netsh interface ipv4 set interface {idx} forwarding=disabled weakhostsend=disabled weakhostreceive=disabled")
                     shell_run(f"netsh interface ipv6 set interface {idx} forwarding=disabled weakhostsend=disabled weakhostreceive=disabled")
-                return "0"
-            elif command.startswith("block-public-ipv6"):
-                cmds = [
-                    'netsh advfirewall firewall add rule name="NordWireConnect Allow IPv6 LinkLocal" dir=out action=allow protocol=IPv6 remoteip=fe80::/10',
-                    'netsh advfirewall firewall add rule name="NordWireConnect Allow IPv6 ULA" dir=out action=allow protocol=IPv6 remoteip=fd00::/8',
-                    'netsh advfirewall firewall add rule name="NordWireConnect Block IPv6 Public" dir=out action=block protocol=IPv6 remoteip=2000::/3'
-                ]
-                for cmd in cmds: add = shell_run(cmd)
-                return "0"
-            elif command.startswith("unlock-public-ipv6"):
-                rules = [
-                    "NordWireConnect Allow IPv6 LinkLocal",
-                    "NordWireConnect Allow IPv6 ULA",
-                    "NordWireConnect Block IPv6 Public"
-                ]
-                for n in rules:
-                    subprocess.run(
-                        ["cmd.exe", "/c", f'netsh advfirewall firewall delete rule name="{n}"'],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=False
-                    )
                 return "0"
             elif command.startswith("cleared-older-version"):
                 if self.cleared_older: return "0"
@@ -226,7 +212,9 @@ class NordWireService(win32serviceutil.ServiceFramework):
                 self.ui_running = False
                 self.last_session_id = None
                 return
-            if self.ui_running and session_id == self.last_session_id: return
+            if self.prevent_opening == True: return
+            if not pip_class.getIfProcessIsOpened("explorer.exe"): return
+            if self.ui_running and session_id == self.last_session_id and pip_class.getIfProcessIsOpened("NordWireConnect.exe"): return
             try:
                 if os.path.exists(os.path.join(program_files, "NordWireConnect.exe")):
                     os.remove(os.path.join(program_files, "NordWireConnect.exe"))
@@ -258,6 +246,7 @@ class NordWireService(win32serviceutil.ServiceFramework):
             servicemanager.LogErrorMsg(f"UI launch failed: {repr(e)}")
             self.ui_running = False
             self.last_session_id = None
+            time.sleep(5)
     def pipe_server(self):
         servicemanager.LogInfoMsg("Pipe server starting")
         while win32event.WaitForSingleObject(self.stop_event, 0) != win32event.WAIT_OBJECT_0:

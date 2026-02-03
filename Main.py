@@ -11,7 +11,6 @@ import sys
 import json
 import time
 import zlib
-import random
 import ctypes
 import typing
 import PyKits
@@ -95,7 +94,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.2.7"
+version = "1.2.8"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = tk.Tk()
 Icon = pystray.Icon
@@ -381,6 +380,7 @@ def uninstall_app():
 def check_stop_flag():
     if stop_app:
         mainMessage("Exiting app..")
+        send_command("ui-closing")
         tk_root.quit()
         sys.exit(0)
         return
@@ -693,17 +693,6 @@ def connect_server(server_name: str, exact_mode: str=None):
     config_data["server"] = server_name
     try: connect(exact_mode=exact_mode)
     except Exception: pass
-def get_client_public_key(private_key: str) -> typing.Tuple[str, str]:
-    pub_key_path = os.path.join(app_data_path, "NordPublicKey.json")
-    if not os.path.exists(pub_key_path):
-        pub_key = send_command(f"generate-public-key {private_key}")
-        preshared = send_command(f"generate-preshared")
-        with open(pub_key_path, "w") as f: json.dump({"pub": pub_key, "pre": preshared}, f)
-    else:
-        with open(pub_key_path, "r") as f: public_key_json = json.load(f)
-        pub_key = public_key_json.get("pub")
-        preshared = public_key_json.get("pre")
-    return pub_key, preshared
 def connect_session():
     global session_data
     if session_data["connected"] == True and config_data.get("auto_connect", True) == True:
@@ -915,7 +904,6 @@ def connect(exact_mode: str=None):
                     wireguard_metadata = m.get("metadata", {})
                     break
             if not wireguard_metadata: continue
-            #client_public, preshared = get_client_public_key(private_key)
             configuration = f"""# {shortened_name}.{city_name}.conf
 [Interface]
 PrivateKey = {private_key}
@@ -1066,9 +1054,10 @@ def app():
         try: uninstall_app()
         except Exception as e: errorMessage(f"There was an error during Installation Handler: {str(e)}"); sys.exit(1); return
 
-    # Clear Old Versions
+    # Handle Starting with Service
     was_old = send_command("cleared-older-version") == "0"
     if was_old == True: setup_shortcuts()
+    send_command("ui-opening")
 
     # Prepare NordWireConnect
     if pip_class.getAmountOfProcesses("NordWireConnect.exe") > 2: 
