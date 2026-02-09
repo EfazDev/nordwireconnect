@@ -29,7 +29,7 @@ pre_program_files = os.getenv("ProgramFiles")
 app_data_path = os.path.join(pip_class.getLocalAppData(), "NordWireConnect")
 program_files = os.path.join(pre_program_files, "NordWireConnect")
 cur_path = os.path.dirname(os.path.abspath(__file__))
-version = "1.2.8"
+version = "1.2.9"
 
 # Logging and Messages
 def systemMessage(message: str): colors_class.print(message, colors_class.hex_to_ansi2("#3E5FFF"))
@@ -82,38 +82,59 @@ def install():
             mainMessage("Please relaunch this program as Admin to continue installation!")
             relaunch_as_admin()
             return
-        mainMessage("Exporting Files..")
+        # Unzip Install Files
+        mainMessage("Exporting Installation Files..")
         zip_file = os.path.join(os.path.dirname(__file__), "NordWireConnect.zip")
-        res = pip_class.unzipFile(zip_file, os.path.join(os.path.dirname(__file__), "installer"), ["NordWireConnect", "NordWireConnectService"])
+        res = pip_class.unzipFile(zip_file, os.path.join(os.path.dirname(__file__), "Installer"), ["NordWireConnect.exe", "NordWireConnectService.exe"])
         if res.returncode != 0:
             errorMessage("Unable to unzip NordWireConnect installation zip.")
             return
-        mainMessage("Installing NordWireConnect..")
+        
+        # Check for Installation and Prepare
+        mainMessage("Preparing for installation..")
         os.makedirs(program_files, exist_ok=True)
-        if os.path.exists(os.path.join(cur_path, "NordSessionData.json")) and not os.path.samefile(os.path.join(cur_path, "NordSessionData.json"), os.path.join(app_data_path, "NordSessionData.json")): shutil.copy(os.path.join(cur_path, "NordSessionData.json"), os.path.join(app_data_path, "NordSessionData.json"))
-        if os.path.exists(os.path.join(cur_path, "ConnectConfig.json")) and not os.path.samefile(os.path.join(cur_path, "ConnectConfig.json"), os.path.join(app_data_path, "ConnectConfig.json")): shutil.copy(os.path.join(cur_path, "ConnectConfig.json"), os.path.join(app_data_path, "ConnectConfig.json"))
-        shutil.copytree(os.path.join(os.path.dirname(__file__), "resources"), os.path.join(program_files, "resources"), dirs_exist_ok=True) 
         subprocess.run("taskkill /IM NordWireConnect.exe /F", shell=True)
-        time.sleep(3)
-        shutil.copytree(os.path.join(os.path.dirname(__file__), "installer", "NordWireConnect"), os.path.join(program_files, "Main"), dirs_exist_ok=True)
         subprocess.run("sc stop NordWireConnectService", shell=True)
         subprocess.run("taskkill /IM NordWireConnectService.exe /F", shell=True)
         time.sleep(3)
-        shutil.copytree(os.path.join(os.path.dirname(__file__), "installer", "NordWireConnectService"), os.path.join(program_files, "Service"), dirs_exist_ok=True)
-        mainMessage("Starting NordWireConnect Service..")
+        if os.path.exists(os.path.join(program_files, "Main")): 
+            shutil.rmtree(os.path.join(program_files, "Main"), ignore_errors=True)
+        if os.path.exists(os.path.join(program_files, "Service")): 
+            shutil.rmtree(os.path.join(program_files, "Service"), ignore_errors=True)
+        if os.path.exists(os.path.join(program_files, "resources")): 
+            shutil.rmtree(os.path.join(program_files, "resources"), ignore_errors=True)
+        if os.path.exists(os.path.join(program_files, "ConnectConfig.json")): 
+            os.remove(os.path.join(program_files, "ConnectConfig.json"))
+        if os.path.exists(os.path.join(program_files, "NordServerCache.json")): 
+            os.remove(os.path.join(program_files, "NordServerCache.json"))
+        
+        # Copy Install Files
+        mainMessage("Copying Installation Files..")
+        shutil.copytree(os.path.join(os.path.dirname(__file__), "Resources"), os.path.join(program_files, "Resources"), dirs_exist_ok=True) 
+        shutil.copytree(os.path.join(os.path.dirname(__file__), "Installer"), program_files, dirs_exist_ok=True)
+
+        # Create Service
+        mainMessage("Creating NordWireConnect Service..")
         subprocess.run(
             "sc delete NordWireConnectService",
             shell=True,
             check=False
         )
         subprocess.run(
-            f'sc create NordWireConnectService binPath= "{os.path.join(program_files, "Service", "NordWireConnectService.exe")}" start=auto',
+            f'sc create NordWireConnectService binPath= "{os.path.join(program_files, "NordWireConnectService.exe")}" start=auto',
             shell=True,
             check=True
         )
+
+        # Start Service
+        mainMessage("Starting NordWireConnect Service..")
         subprocess.run("sc start NordWireConnectService", shell=True)
+
+        # Finalize and Setup Registry
         mainMessage("Setting up registry..")
         setup_registry()
+        successMessage("DONE! This window will close in 3 seconds..")
+        time.sleep(3)
         sys.exit(0)
 def setup_registry():
     try:
@@ -125,10 +146,10 @@ def setup_registry():
         win32api.RegCloseKey(app_key)
         registry_path = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\NordWireConnect"
         registry_key = win32api.RegCreateKey(win32con.HKEY_LOCAL_MACHINE, registry_path)
-        win32api.RegSetValueEx(registry_key, "UninstallString", 0, win32con.REG_SZ, f"\"{os.path.join(program_files, 'Main', 'NordWireConnect.exe')}\" -uninstall-nord-wire-connect")
+        win32api.RegSetValueEx(registry_key, "UninstallString", 0, win32con.REG_SZ, f"\"{os.path.join(program_files, 'NordWireConnect.exe')}\" -uninstall-nord-wire-connect")
         win32api.RegSetValueEx(registry_key, "DisplayName", 0, win32con.REG_SZ, "NordWireConnect")
         win32api.RegSetValueEx(registry_key, "DisplayVersion", 0, win32con.REG_SZ, version)
-        win32api.RegSetValueEx(registry_key, "DisplayIcon", 0, win32con.REG_SZ, os.path.join(program_files, "resources", "app_icon.ico"))
+        win32api.RegSetValueEx(registry_key, "DisplayIcon", 0, win32con.REG_SZ, os.path.join(program_files, "Resources", "app_icon.ico"))
         win32api.RegSetValueEx(registry_key, "InstallLocation", 0, win32con.REG_SZ, program_files)
         win32api.RegSetValueEx(registry_key, "Publisher", 0, win32con.REG_SZ, "EfazDev")
         win32api.RegSetValueEx(registry_key, "EstimatedSize", 0, win32con.REG_DWORD, min(get_folder_size(program_files, formatWithAbbreviation=False) // 1024, 0xFFFFFFFF))

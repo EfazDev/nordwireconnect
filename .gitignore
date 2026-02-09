@@ -1,9 +1,9 @@
 build
 dist
-NordWireConnect.spec
-NordWireConnectInstaller.spec
-NordWireConnectService.spec
+UPX
 QuickRebuild.bat
+NordWireConnectDebug.spec
+NordWireConnectInstaller.spec
 Debug.bat
 .DS_Store
 installer

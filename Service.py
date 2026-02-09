@@ -7,9 +7,12 @@ https://www.efaz.dev
 
 # Modules
 import os
+import sys
 import time
 import PyKits
+import logging
 import win32ts # type: ignore
+import datetime
 import win32con # type: ignore
 import win32file # type: ignore
 import win32pipe # type: ignore
@@ -27,9 +30,42 @@ import win32serviceutil # type: ignore
 # Variables
 service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
-nordwireconnect_location = os.path.join(program_files, "Main", "NordWireConnect.exe")
+nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
+version = "1.2.9"
+colors_class = PyKits.Colors()
 pip_class = PyKits.pip()
+
+# Logging
+def info(message: str): servicemanager.LogInfoMsg(message); mainMessage(message)
+def error(message: str): servicemanager.LogErrorMsg(message); errorMessage(message)
+def warn(message: str): servicemanager.LogWarningMsg(message); warnMessage(message)
+def systemMessage(message: str): colors_class.print(message, colors_class.hex_to_ansi2("#3E5FFF"))
+def mainMessage(message: str): colors_class.print(message, 15)
+def errorMessage(message: str, title: str="Uh oh!"):  colors_class.print(message, 9)
+def warnMessage(message: str): colors_class.print(message, 11)
+def successMessage(message: str): colors_class.print(message, 10)
+def setup_logging():
+    handler_name = "Service"
+    log_path = os.path.join(program_files, "Logs")
+    if not os.path.exists(log_path): os.makedirs(log_path,mode=511)
+    generated_file_name = f'NordWireConnect_{handler_name}_{datetime.datetime.now().strftime("%B_%d_%Y_%H_%M_%S_%f")}.log' 
+    if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding='utf-8')
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    file_handler = logging.FileHandler(os.path.join(log_path, generated_file_name), encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    if sys.stdout:
+        try:
+            stdout_stream = logging.StreamHandler(sys.stdout)
+            stdout_stream.setLevel(logging.INFO)
+            stdout_stream.setFormatter(logging.Formatter("%(message)s"))
+            logger.addHandler(stdout_stream)
+        except Exception: pass
+    logger.addHandler(file_handler)
+    sys.stdout = PyKits.stdout(logger, logging.INFO)
+    sys.stderr = PyKits.stdout(logger, logging.ERROR)
 
 # Pipe Administration
 def create_pipe_sa():
@@ -73,7 +109,7 @@ def check_for_unbricks(idx: str) -> bool:
     return False
 
 # Service Class
-class NordWireService(win32serviceutil.ServiceFramework):
+class NordWireConnectService(win32serviceutil.ServiceFramework):
     _svc_name_ = "NordWireConnectService"
     _svc_display_name_ = "NordWireConnectService"
     _svc_description_ = "Handles NordWireConnect with UI Handling, Background Tasks and WireGuard Management!"
@@ -91,7 +127,7 @@ class NordWireService(win32serviceutil.ServiceFramework):
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
         win32event.SetEvent(self.stop_event)
     def SvcDoRun(self):
-        servicemanager.LogInfoMsg("NordWireConnect service starting")
+        info("NordWireConnect service starting")
         self.ReportServiceStatus(win32service.SERVICE_RUNNING)
         threading.Thread(target=self.pipe_server, daemon=True).start()
         while True:
@@ -100,16 +136,16 @@ class NordWireService(win32serviceutil.ServiceFramework):
     def SvcOtherEx(self, control: int, event_type: int, data):
         if control == win32service.SERVICE_CONTROL_POWEREVENT:
             if event_type == win32con.PBT_APMSUSPEND:
-                servicemanager.LogInfoMsg("System suspending")
+                info("System suspending")
                 self.ui_running = False
                 self.last_session_id = None
             elif event_type in (win32con.PBT_APMRESUMEAUTOMATIC, win32con.PBT_APMRESUMECRITICAL):
-                servicemanager.LogInfoMsg("System resumed")
+                info("System resumed")
                 time.sleep(5)
                 self.ui_running = False
                 self.last_session_id = None
     def handle_command(self, command: str) -> str:
-        servicemanager.LogInfoMsg(f"Received command: {command}")
+        info(f"Received command: {command}")
         try:
             if command == "end-wireguard-tunnels":
                 kill = shell_run("powershell -Command \"Get-Service WireGuardTunnel* | Stop-Service -Force\"")
@@ -128,10 +164,13 @@ class NordWireService(win32serviceutil.ServiceFramework):
                         sn = l.split(": ", 1)[1].strip()
                         subprocess.run(["sc", "delete", sn], check=True)
                 return "0"
-            elif command == "ui-opening":
+            elif command == "ui-opening": 
                 self.prevent_opening = False
-            elif command == "ui-closing":
+                return "0"
+            elif command == "ui-closing": 
                 self.prevent_opening = True
+                return "0"
+            elif command == "service-version": return version
             elif command == "end-wireguard-installer":
                 end = shell_run("taskkill /IM wireguard-installer.exe /F")
                 self.connected_tunnel = None
@@ -163,6 +202,15 @@ class NordWireService(win32serviceutil.ServiceFramework):
             elif command.startswith("combined-end-wireguard"):
                 self.handle_command("end-wireguard")
                 return self.handle_command("end-wireguard-installer")
+            elif command.startswith("data-usage"):
+                if self.connected_tunnel:
+                    wg_check = subprocess.run([os.path.join(wireguard_location, "wg.exe"), "show"], capture_output=True, text=True)
+                    output = wg_check.stdout.strip()
+                    lines = output.splitlines()
+                    for l in lines:
+                        l = l.strip()
+                        if "transfer:" in l: return l.replace("transfer: ", "").replace(" received", "").replace(" sent", "").replace(", ", ",")
+                return "0,0"
             elif command.startswith("unbrick-adapter"):
                 get_interfaces_req = subprocess.run(
                     "netsh interface ipv4 show route",
@@ -180,19 +228,11 @@ class NordWireService(win32serviceutil.ServiceFramework):
                     if "0.0.0.0/0" in line or "::/0" in line
                 }
                 for idx in interface_indexes:
-                    # Validation
                     if not idx.isdigit(): continue
-
-                    # Should Unbrick?
                     if not check_for_unbricks(idx): continue
-                    
-                    # Unbrick
                     shell_run(f"netsh interface ipv4 set interface {idx} forwarding=disabled weakhostsend=disabled weakhostreceive=disabled")
                     shell_run(f"netsh interface ipv6 set interface {idx} forwarding=disabled weakhostsend=disabled weakhostreceive=disabled")
                 return "0"
-            elif command.startswith("cleared-older-version"):
-                if self.cleared_older: return "0"
-                else: return "1"
             elif command == "wireguard-check":
                 wg_check = subprocess.run([os.path.join(wireguard_location, "wg.exe"), "show"], capture_output=True, text=True)
                 output = wg_check.stdout.strip()
@@ -203,7 +243,7 @@ class NordWireService(win32serviceutil.ServiceFramework):
             elif command == "connection-status":
                 if self.connected_tunnel: return self.connected_tunnel
                 else: return "NotConnected"
-        except Exception as e: servicemanager.LogErrorMsg(f"Failed running pipe command ({command}): {repr(e)}")
+        except Exception as e: error(f"Failed running pipe command ({command}): {repr(e)}")
         return "1"
     def ensure_ui_running(self):
         try:
@@ -215,14 +255,6 @@ class NordWireService(win32serviceutil.ServiceFramework):
             if self.prevent_opening == True: return
             if not pip_class.getIfProcessIsOpened("explorer.exe"): return
             if self.ui_running and session_id == self.last_session_id and pip_class.getIfProcessIsOpened("NordWireConnect.exe"): return
-            try:
-                if os.path.exists(os.path.join(program_files, "NordWireConnect.exe")):
-                    os.remove(os.path.join(program_files, "NordWireConnect.exe"))
-                    self.cleared_older = True
-                if os.path.exists(os.path.join(program_files, "NordWireConnectService.exe")):
-                    os.remove(os.path.join(program_files, "NordWireConnectService.exe"))
-                    self.cleared_older = True
-            except Exception as e: servicemanager.LogInfoMsg("Clearing Older Versions of NordWireConnect..")
             user_token = win32ts.WTSQueryUserToken(session_id)
             env = win32profile.CreateEnvironmentBlock(user_token, False)
             startup = win32process.STARTUPINFO()
@@ -241,14 +273,14 @@ class NordWireService(win32serviceutil.ServiceFramework):
             )
             self.ui_running = True
             self.last_session_id = session_id
-            servicemanager.LogInfoMsg("NordWireConnect UI launched")
+            info("NordWireConnect UI launched")
         except Exception as e:
-            servicemanager.LogErrorMsg(f"UI launch failed: {repr(e)}")
+            error(f"UI launch failed: {repr(e)}")
             self.ui_running = False
             self.last_session_id = None
             time.sleep(5)
     def pipe_server(self):
-        servicemanager.LogInfoMsg("Pipe server starting")
+        info("Pipe server starting")
         while win32event.WaitForSingleObject(self.stop_event, 0) != win32event.WAIT_OBJECT_0:
             pipe = None
             try:
@@ -268,18 +300,22 @@ class NordWireService(win32serviceutil.ServiceFramework):
                 win32pipe.ConnectNamedPipe(pipe, None)
                 while True:
                     try: _, data = win32file.ReadFile(pipe, 4096)
-                    except: break
+                    except Exception: break
                     command = data.decode().strip()
                     response = self.handle_command(command)
                     win32file.WriteFile(pipe, response.encode())
-            except Exception as e: servicemanager.LogErrorMsg(f"Pipe error: {repr(e)}")
+            except Exception as e: error(f"Pipe error: {repr(e)}")
             finally:
                 if pipe:
                     try: win32file.CloseHandle(pipe)
-                    except: pass
+                    except Exception: pass
 
 # Service Runtime
 if __name__ == "__main__":
+    colors_class.fix_windows_ansi()
+    setup_logging()
+    systemMessage(f"{'-'*5:^5} NordWireConnectService v{version} {'-'*5:^5}")
     servicemanager.Initialize()
-    servicemanager.PrepareToHostSingle(NordWireService)
+    servicemanager.PrepareToHostSingle(NordWireConnectService)
+    mainMessage("Starting service..")
     servicemanager.StartServiceCtrlDispatcher()

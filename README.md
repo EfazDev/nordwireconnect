@@ -1,4 +1,4 @@
-<h1 align="center"><img align="center" src="resources/app_icon.png" width="40" height="40"> NordWireConnect</h1>
+<h1 align="center"><img align="center" src="Resources/app_icon.png" width="40" height="40"> NordWireConnect</h1>
 <h2 align="center">Connect to NordVPN using Wireguard!</h2>
 
 ## Disclaimer
@@ -26,7 +26,7 @@ NordWireConnect and Wireguard will require Administrator permissions before inst
 - Brute End Wireguard (As a last resort, if Wireguard breaks, you can force end the process.)
 
 ## Rebuilding
-The following command (package dependencies) and Python 3.12+ are needed to rebuild the NordWireConnect app: `pip install pywin32 Pillow pystray pyinstaller`. After that all the packages are installed, run the Rebuild.bat file to build and create an exe file in a dist folder (will automatically create if not found).
+The following command (package dependencies) and Python 3.12+ are needed to rebuild the NordWireConnect app: `pip install pywin32 Pillow pystray pyinstaller truststore`. After that all the packages are installed, run the Rebuild.bat file to build and create an exe file in a dist folder (will automatically create if not found).
 
 ## Uninstall
 If you want to uninstall the program, you may go to the Installed Apps menu in Windows Settings and uninstall the app. This will also require administrative permissions.

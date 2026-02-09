@@ -51,6 +51,7 @@ config_data = {
     "openvpn_username": "",
     "openvpn_password": "",
     "nordvpn_email": "",
+    "last_version": None,
     "dns": "103.86.96.100, 103.86.99.100", # NordVPN DNS
     "server": "auto",
     "auto_connect": True,
@@ -71,6 +72,7 @@ config_data_type_allowed = {
     "openvpn_password": typing.Union[str, None],
     "nordvpn_email": typing.Union[str, None],
     "dns": str,
+    "last_version": typing.Union[str, None],
     "server": typing.Union[str, None],
     "auto_connect": bool,
     "notifications": bool,
@@ -94,9 +96,9 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.2.8"
+version = "1.2.9"
 service_pipe = r"\\.\pipe\NordWireConnect"
-tk_root = tk.Tk()
+tk_root = None
 Icon = pystray.Icon
 MenuItem = pystray.MenuItem
 server_filter = "&filters[servers.status]=online&fields[servers.id]&fields[servers.name]&fields[servers.hostname]&fields[servers.station]&fields[servers.status]&fields[servers.load]&fields[servers.created_at]&fields[servers.groups.id]&fields[servers.groups.title]&fields[servers.technologies.id]&fields[servers.technologies.metadata]&fields[servers.technologies.pivot.status]&fields[servers.specifications.identifier]&fields[servers.specifications.values.value]&fields[servers.locations.country.name]&fields[servers.locations.country.code]&fields[servers.locations.country.city.name]&fields[servers.locations.country.city.latitude]&fields[servers.locations.country.city.longitude]&fields[servers.locations.country.city.hub_score]&fields[servers.ips]"
@@ -160,7 +162,7 @@ def notification(title: str, message: str):
         if pystray_icon: pystray_icon.notify(message, title)
     addToThread(a, ())
 def set_icon(img: str):
-    image = getImageObj(os.path.join(program_files, "resources", img))
+    image = getImageObj(os.path.join(program_files, "Resources", img))
     if pystray_icon:
         pystray_icon.icon = image
         update_tray()
@@ -229,7 +231,7 @@ def select_server_list(message: str="Please select a server!") -> typing.Union[N
     win.geometry("320x120")
     win.resizable(False, False)
     win.attributes("-topmost", True)
-    win.iconphoto(False, tk.PhotoImage(file=os.path.join(program_files, "resources", "app_icon.png")))
+    win.iconphoto(False, tk.PhotoImage(file=os.path.join(program_files, "Resources", "app_icon.png")))
     selected = {
         "title": None,
         "tunnel_id": None,
@@ -312,7 +314,7 @@ def save_auto_selected_server_button():
         return
     default_location(selected_server["tunnel_id"], selected_server["exact_mode"])
     update_tray()
-def setup_shortcuts():
+def setup_shortcuts(button: bool=False):
     try:
         pythoncom.CoInitialize()
         try:
@@ -320,16 +322,16 @@ def setup_shortcuts():
             desk_shortpath = os.path.join(os.environ["USERPROFILE"], "Desktop", f"NordWireConnect.lnk")
             desk_short = shell.CreateShortcut(desk_shortpath)
             desk_short.TargetPath = sys.executable
-            desk_short.IconLocation = os.path.join(program_files, "resources", "app_icon.ico")
+            desk_short.IconLocation = os.path.join(program_files, "Resources", "app_icon.ico")
             desk_short.Description = "Open NordWireConnect for VPN!"
             desk_short.Save()
             startm_shortpath = os.path.join(os.getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", f"NordWireConnect.lnk")
             startm_short = shell.CreateShortcut(startm_shortpath)
             startm_short.TargetPath = sys.executable
-            startm_short.IconLocation = os.path.join(program_files, "resources", "app_icon.ico")
+            startm_short.IconLocation = os.path.join(program_files, "Resources", "app_icon.ico")
             startm_short.Description = "Open NordWireConnect for VPN!"
             startm_short.Save()
-            successMessageBox(f"Successfully set up shortcuts for NordWireConnect!", "NordWireConnect")
+            if button == True: successMessageBox(f"Successfully set up shortcuts for NordWireConnect!", "NordWireConnect")
         finally: pythoncom.CoUninitialize()
     except Exception as e: errorMessage(f"Unable to save shortcuts: {str(e)}")
 def delete_shortcuts():
@@ -369,7 +371,7 @@ def uninstall_app():
     cmd = f'''
     timeout /t 2 >nul
     taskkill /IM NordWireConnect.exe /F
-    del "{os.path.join(program_files, "Main", "NordWireConnect.exe")}"
+    del "{os.path.join(program_files, "NordWireConnect.exe")}"
     rmdir /s /q "{program_files}"
     '''
     subprocess.Popen(
@@ -457,6 +459,19 @@ def reset_windows_networking():
                 1
             )
     except Exception as e: errorMessage(f"Unable to reset Windows Networking: {str(e)}")
+def clear_configuration():
+    try:
+        confirmed = messagebox.askyesno("Clear Configuration", f"Are you sure you want to clear all NordWireConnect configuration data?", icon="question")
+        if confirmed:
+            disconnect(only_disconnect=True)
+            mainMessage("Clearing configuration data..")
+            config_path = os.path.join(app_data_path, "ConnectConfig.json")
+            if os.path.exists(config_path):
+                with open(config_path, "w") as f: f.write("{}")
+            config_data.clear()
+            load_configuration()
+            update_tray()
+    except Exception as e: errorMessage(f"Unable to clear configuration data: {str(e)}")
 
 # Data Handling
 def session_data_modified():
@@ -675,6 +690,9 @@ def differ_to_status4() -> str:
 def differ_to_status5() -> str: 
     if session_data["connected"] == True: return f"Session Time: {format_seconds(session_data['session_time'])}"
     else: return "Session Time: N/A"
+def differ_to_status6() -> str: 
+    if session_data["connected"] == True: return f"Data Usage: {session_data.get('download_data_usage', 'N/A')} ⬇️, {session_data.get('upload_data_usage', 'N/A')} ⬆️"
+    else: return "Data Usage: N/A"
 def differ_to_config1() -> str: return f"DNS Servers: {config_data['dns']}"
 def differ_to_config2() -> str: return f"Account: {config_data.get('username', 'N/A')} (Token {len(config_data['access_token']) > 60 and 'Given' or 'Ungiven'})"
 def differ_to_config3() -> str: return f"Connection Channel: {config_data.get('connection_channel', 'N/A')}"
@@ -877,7 +895,7 @@ def connect(exact_mode: str=None):
             ind = 0
             channeled_list = []
             for s in all_server_recommendations:
-                if convert_to_channel(s["hostname"]) == config_data.get("connection_channel", 1): channeled_list.append(s)
+                if convert_to_channel(s["hostname"]) == config_data.get("connection_channel"): channeled_list.append(s)
                 ind += 1
             all_server_recommendations = channeled_list
         mainMessage(f"Loaded {len(all_server_recommendations)} NordVPN server recommendation(s).")
@@ -1022,6 +1040,10 @@ def handle_stat_thread():
                     if check_load_swapping() and session_data["current_load"] > 50:
                         mainMessage("Reconnecting due to load > 50%..")
                         differ_from_status_action2()
+                    data_usage = send_command("data-usage").split(",")
+                    if len(data_usage) == 2:
+                        session_data["download_data_usage"] = data_usage[0]
+                        session_data["upload_data_usage"] = data_usage[1]
                 session_data["session_time"] = since_connected
                 update_tray()
             else:
@@ -1036,11 +1058,21 @@ def app():
     global pystray_icon
     global private_key
     global session_data
+    global tk_root
     colors_class.fix_windows_ansi()
     setup_logging()
     systemMessage(f"{'-'*5:^5} NordWireConnect v{version} {'-'*5:^5}")
+
+    # Setup Tkinter
+    mainMessage("Starting Tkinter Library..")
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        os.environ["TCL_LIBRARY"] = os.path.join(sys._MEIPASS, "_tcl_data")
+        os.environ["TK_LIBRARY"] = os.path.join(sys._MEIPASS, '_tk_data')
+    tk_root = tk.Tk()
     tk_root.withdraw()
 
+    # Ensure App Data Path
+    mainMessage("Ensuring App Data Paths..")
     os.makedirs(app_data_path, exist_ok=True)
 
     # Only for Windows
@@ -1054,12 +1086,8 @@ def app():
         try: uninstall_app()
         except Exception as e: errorMessage(f"There was an error during Installation Handler: {str(e)}"); sys.exit(1); return
 
-    # Handle Starting with Service
-    was_old = send_command("cleared-older-version") == "0"
-    if was_old == True: setup_shortcuts()
-    send_command("ui-opening")
-
-    # Prepare NordWireConnect
+    # NordWireConnect Instance Check
+    mainMessage("Checking for Other Existing NordWireConnect Instances..")
     if pip_class.getAmountOfProcesses("NordWireConnect.exe") > 2: 
         errorMessage("NordWireConnect is already running right now!")
         sys.exit(1)
@@ -1073,7 +1101,29 @@ def app():
             with open(os.path.join(app_data_path, "NordSessionData.json"), "r") as f: session_data = json.load(f)
     except Exception as e: errorMessage(f"There was an error trying to load configuration: {str(e)}"); sys.exit(1); return
 
+    # Handle Starting with Service
+    mainMessage("Verifying Service Status..")
+    if not pip_class.getIfProcessIsOpened("NordWireConnectService."):
+        mainMessage("NordWireConnectService is not running. Attempting to start it now..")
+        with open(os.path.join(app_data_path, "StartService.bat"), "w") as f: f.write(f"@echo off\nsc delete NordWireConnectService\nsc create NordWireConnectService binPath= \"{os.path.join(program_files, 'NordWireConnectService.exe')}\" start=auto\nsc start NordWireConnectService")
+        ctypes.windll.shell32.ShellExecuteW(
+            None,
+            "runas",
+            f"\"{os.path.join(app_data_path, 'StartService.bat')}\"",
+            "",
+            None,
+            1
+        )
+        time.sleep(2)
+        sys.exit(0)
+        return
+    was_old = config_data.get("last_version") != version
+    if was_old == True: setup_shortcuts()
+    send_command("ui-opening")
+    config_data["last_version"] = version
+
     # Break Hanging Connections
+    mainMessage("Breaking Hanging Connections..")
     try:
         if not tunnel_check():
             disconnect(only_disconnect=True)
@@ -1108,7 +1158,7 @@ def app():
         def create_mini_func(func: typing.Callable, connected: bool=False):
             def a(icon: Icon, item: MenuItem): addToThread(func, (), connection=False)
             return a
-        image = getImageObj(os.path.join(program_files, "resources", "app_icon.ico"))
+        image = getImageObj(os.path.join(program_files, "Resources", "app_icon.ico"))
         pystray_icon = pystray.Icon(
             "NordWireConnect",
             image,
@@ -1121,6 +1171,7 @@ def app():
                 pystray.MenuItem(unicon(differ_to_status3), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
                 pystray.MenuItem(unicon(differ_to_status4), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
                 pystray.MenuItem(unicon(differ_to_status5), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
+                pystray.MenuItem(unicon(differ_to_status6), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem(unicon(differ_from_status_text), create_mini_func(differ_from_status_action, connected=True)),
                 pystray.MenuItem("Reconnect Servers", create_mini_func(differ_from_status_action2, connected=True), visible=lambda icon: session_data["connected"] == True),
@@ -1134,10 +1185,11 @@ def app():
                     pystray.MenuItem("Change Access Token", lambda icon, item: tk_root.after(0, change_access_token)),
                     pystray.MenuItem("Change Connection Channel", lambda icon, item: tk_root.after(0, change_connection_channel)),
                     pystray.MenuItem(unicon(differ_to_config4), lambda icon, item: tk_root.after(0, save_auto_selected_server_button)),
-                    pystray.MenuItem("Set Shortcuts", create_mini_func(setup_shortcuts)),
+                    pystray.MenuItem("Set Shortcuts", create_mini_func(unicon(setup_shortcuts, [True]))),
                     pystray.MenuItem("Brute End Wireguard", create_mini_func(brute_end_wireguard)),
                     pystray.MenuItem("Reset DNS Cache", lambda icon, item: unicon(reset_dns_cache)),
                     pystray.MenuItem("Reset Windows Networking", lambda icon, item: tk_root.after(0, reset_windows_networking)),
+                    pystray.MenuItem("Clear Configuration", lambda icon, item: tk_root.after(0, clear_configuration)),
                     pystray.Menu.SEPARATOR,
                     pystray.MenuItem("Load Swapping", unicon(change_load_swapping), checked=unicon(check_load_swapping), radio=True),
                     pystray.MenuItem("Auto Reconnect", unicon(change_auto_connect), checked=unicon(check_auto_connect), radio=True),
@@ -1163,7 +1215,7 @@ def app():
         threading.Thread(target=handle_stat_thread, daemon=True).start()
         if config_data.get("check_for_updates", True) == True: threading.Thread(target=auto_check_for_updates, daemon=True).start()
         tk_root.after(100, check_stop_flag)
-        tk_root.iconphoto(True, tk.PhotoImage(file=os.path.join(program_files, "resources", "app_icon.png"))) 
+        tk_root.iconphoto(True, tk.PhotoImage(file=os.path.join(program_files, "Resources", "app_icon.png"))) 
         pystray_icon.run_detached(unicon(setup))
         tk.mainloop()
     except Exception as e: errorMessage(f"Unable to run app. Exception: {str(e)}"); sys.exit(1); return
