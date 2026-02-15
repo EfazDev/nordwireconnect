@@ -32,7 +32,7 @@ service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-version = "1.2.9"
+version = "1.3.0a"
 colors_class = PyKits.Colors()
 pip_class = PyKits.pip()
 
@@ -148,22 +148,19 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
         info(f"Received command: {command}")
         try:
             if command == "end-wireguard-tunnels":
-                kill = shell_run("powershell -Command \"Get-Service WireGuardTunnel* | Stop-Service -Force\"")
+                for l in subprocess.check_output(["sc", "query", "state=", "all"], text=True).splitlines():
+                    l = l.strip()
+                    if l.startswith("SERVICE_NAME:") and "WireGuardTunnel$" in l:
+                        sn = l.split(": ", 1)[1].strip()
+                        win32serviceutil.StopService(sn)
+                        win32serviceutil.RemoveService(sn)
                 self.connected_tunnel = None
-                self.handle_command("delete-wireguard-services")
-                return str(kill.returncode)
+                return "0"
             elif command == "end-wireguard":
                 self.handle_command("end-wireguard-tunnels")
                 end = shell_run("taskkill /IM wireguard.exe /F")
                 self.connected_tunnel = None
                 return str(end.returncode)
-            elif command == "delete-wireguard-services":
-                for l in subprocess.check_output(["sc", "query", "state=", "all"], text=True).splitlines():
-                    l = l.strip()
-                    if l.startswith("SERVICE_NAME:") and "WireGuardTunnel$" in l:
-                        sn = l.split(": ", 1)[1].strip()
-                        subprocess.run(["sc", "delete", sn], check=True)
-                return "0"
             elif command == "ui-opening": 
                 self.prevent_opening = False
                 return "0"

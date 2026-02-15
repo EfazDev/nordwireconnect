@@ -29,7 +29,7 @@ pre_program_files = os.getenv("ProgramFiles")
 app_data_path = os.path.join(pip_class.getLocalAppData(), "NordWireConnect")
 program_files = os.path.join(pre_program_files, "NordWireConnect")
 cur_path = os.path.dirname(os.path.abspath(__file__))
-version = "1.2.9"
+version = "1.3.0a"
 
 # Logging and Messages
 def systemMessage(message: str): colors_class.print(message, colors_class.hex_to_ansi2("#3E5FFF"))
@@ -93,9 +93,9 @@ def install():
         # Check for Installation and Prepare
         mainMessage("Preparing for installation..")
         os.makedirs(program_files, exist_ok=True)
-        subprocess.run("taskkill /IM NordWireConnect.exe /F", shell=True)
         subprocess.run("sc stop NordWireConnectService", shell=True)
         subprocess.run("taskkill /IM NordWireConnectService.exe /F", shell=True)
+        subprocess.run("taskkill /IM NordWireConnect.exe /F", shell=True)
         time.sleep(3)
         if os.path.exists(os.path.join(program_files, "Main")): 
             shutil.rmtree(os.path.join(program_files, "Main"), ignore_errors=True)

@@ -96,7 +96,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.2.9"
+version = "1.3.0a"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -411,6 +411,7 @@ def tkinter_install_updates(latest_ver: str):
             installer_path = os.path.join(app_data_path, "NordWireConnectInstaller.exe")
             download_progress = requests.download(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe", installer_path)
             if download_progress.ok:
+                disconnect()
                 ctypes.windll.shell32.ShellExecuteW(
                     None,
                     "runas",
@@ -419,8 +420,6 @@ def tkinter_install_updates(latest_ver: str):
                     None,
                     1
                 )
-                quit_app()
-                sys.exit(0)
             else: 
                 if os.path.exists(installer_path): os.remove(installer_path)
                 errorMessage("Unable to download NordWireConnectInstaller from GitHub!")
@@ -535,7 +534,7 @@ def get_if_virtual_location(server: dict) -> bool:
     return False
 def change_dns():
     inputted = simpledialog.askstring(title="DNS Input", prompt="Enter IPv4 DNS servers to use (comma separated):")
-    ips = inputted.split(", ")
+    ips = inputted.replace(" ", "").split(",")
     added = [ip for ip in ips if requests.get_if_ip(ip)]
     if added:
         config_data["dns"] = ", ".join(added)
