@@ -96,7 +96,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.0a"
+version = "1.3.0b"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -1015,7 +1015,7 @@ def handle_stat_thread():
                         mainMessage("Reconnecting due to loss of connection.")
                         differ_from_status_action2()
                         continue
-                    if send_command("wireguard-check") == "1" and not session_data["connection_text"].startswith("Connecting"):
+                    if count % 5 == 0 and send_command("wireguard-check") == "1" and not session_data["connection_text"].startswith("Connecting"):
                         mainMessage("Reconnecting due to loss of VPN.")
                         differ_from_status_action2()
                         continue
