@@ -32,7 +32,7 @@ service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-version = "1.3.0b"
+version = "1.3.0c"
 colors_class = PyKits.Colors()
 pip_class = PyKits.pip()
 
@@ -149,11 +149,11 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
         try:
             if command == "end-wireguard":
                 end = shell_run("taskkill /IM wireguard.exe /F")
-                for l in subprocess.check_output(["sc", "query", "state=", "all"], text=True).splitlines():
-                    l = l.strip()
-                    if l.startswith("SERVICE_NAME:") and "WireGuardTunnel$" in l:
-                        sn = l.split(": ", 1)[1].strip()
-                        win32serviceutil.RemoveService(sn)
+                time.sleep(0.5)
+                scm = win32service.OpenSCManager(None, None, win32service.SC_MANAGER_ENUMERATE_SERVICE)
+                statuses = win32service.EnumServicesStatus(scm)
+                for (name, display, status) in statuses:
+                    if name.startswith("WireGuardTunnel$"): win32serviceutil.RemoveService(name)
                 self.connected_tunnel = None
                 return str(end.returncode)
             elif command == "ui-opening": 
