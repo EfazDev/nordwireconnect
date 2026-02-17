@@ -32,7 +32,7 @@ service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-version = "1.3.0d"
+version = "1.3.0e"
 colors_class = PyKits.Colors()
 pip_class = PyKits.pip()
 
@@ -217,23 +217,23 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                     elif "Persistent Routes:" in l: active = False
                     elif parsing_mode and active:
                         if "0.0.0.0" in l and parsing_mode == 1:
-                            parts = l.split(" ")
-                            for p in parts:
+                            for p in l.split(" "):
                                 p = p.strip()
                                 if not p: continue
                                 if p == "0.0.0.0": continue
                                 if p.count(".") == 3:
                                     ipv4 = p
-                                    break
+                                    parsing_mode = None
+                                    active = False
                         elif "::/0" in l and parsing_mode == 2:
-                            parts = l.split(" ")
-                            for p in parts:
+                            for p in l.split(" "):
                                 p = p.strip()
                                 if not p: continue
                                 if p == "::/0": continue
                                 if ":" in p:
                                     ipv6 = p
-                                    break
+                                    parsing_mode = None
+                                    active = False
                 return f"{ipv4},{ipv6}"
             elif command.startswith("unbrick-adapter"):
                 get_interfaces_req = subprocess.run(
