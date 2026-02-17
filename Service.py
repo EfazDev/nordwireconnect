@@ -32,7 +32,7 @@ service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-version = "1.3.0g"
+version = "1.3.0h"
 colors_class = PyKits.Colors()
 pip_class = PyKits.pip()
 
@@ -107,6 +107,15 @@ def check_for_unbricks(idx: str) -> bool:
         if "weak host receives" in ln and "enabled" in ln: return True
         if "forwarding" in ln and "enabled" in ln: return True
     return False
+def wait_for_service(name: str, timeout: int=30, status: int=win32service.SERVICE_RUNNING) -> bool:
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            current_status = win32serviceutil.QueryServiceStatus(name)[1]
+            if current_status == status: return True
+        except Exception: pass
+        time.sleep(0.5)
+    return False
 
 # Service Class
 class NordWireConnectService(win32serviceutil.ServiceFramework):
@@ -153,7 +162,9 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                 statuses = win32service.EnumServicesStatus(scm)
                 for (name, display, status) in statuses:
                     if name.startswith("WireGuardTunnel$"): 
-                        try: win32serviceutil.StopService(name)
+                        try: 
+                            win32serviceutil.StopService(name)
+                            wait_for_service(name, timeout=15, status=win32service.SERVICE_STOPPED)
                         except: pass
                         try: win32serviceutil.RemoveService(name)
                         except: pass
@@ -181,6 +192,7 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                 config_path = " ".join(command[1:])
                 add = subprocess.run([os.path.join(wireguard_location, "wireguard.exe"), "/installtunnelservice", config_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 self.connected_tunnel = ".".join(os.path.basename(config_path).split(".")[:-1])
+                wait_for_service("WireGuardTunnel$" + self.connected_tunnel)
                 return str(add.returncode)
             elif command.startswith("combined-disconnect"):
                 command = command.split(" ")
