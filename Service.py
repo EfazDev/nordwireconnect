@@ -32,7 +32,7 @@ service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-version = "1.3.0c"
+version = "1.3.0d"
 colors_class = PyKits.Colors()
 pip_class = PyKits.pip()
 
@@ -145,8 +145,8 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                 self.ui_running = False
                 self.last_session_id = None
     def handle_command(self, command: str) -> str:
-        info(f"Received command: {command}")
         try:
+            if command != "wireguard-check": info(f"Received command: {command}")
             if command == "end-wireguard":
                 end = shell_run("taskkill /IM wireguard.exe /F")
                 time.sleep(0.5)
@@ -203,6 +203,38 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                         l = l.strip()
                         if "transfer:" in l: return l.replace("transfer: ", "").replace(" received", "").replace(" sent", "").replace(", ", ",")
                 return "0,0"
+            elif command.startswith("router-ip-info"):
+                route_out = subprocess.run("route print 0.0.0.0", shell=True, capture_output=True, text=True).stdout.replace("[SEPARATE]", "") + "\n[SEPARATE]\n" + subprocess.run("route print ::/0", shell=True, capture_output=True, text=True).stdout.replace("[SEPARATE]", "")
+                parsing_mode = None
+                active = False
+                ipv4 = None
+                ipv6 = None
+                for l in route_out.splitlines():
+                    if "IPv4 Route Table" in l: parsing_mode = 1
+                    elif "IPv6 Route Table" in l: parsing_mode = 2
+                    elif "[SEPARATE]" in l: parsing_mode = None
+                    elif "Active Routes:" in l: active = True
+                    elif "Persistent Routes:" in l: active = False
+                    elif parsing_mode and active:
+                        if "0.0.0.0" in l and parsing_mode == 1:
+                            parts = l.split(" ")
+                            for p in parts:
+                                p = p.strip()
+                                if not p: continue
+                                if p == "0.0.0.0": continue
+                                if p.count(".") == 3:
+                                    ipv4 = p
+                                    break
+                        elif "::/0" in l and parsing_mode == 2:
+                            parts = l.split(" ")
+                            for p in parts:
+                                p = p.strip()
+                                if not p: continue
+                                if p == "::/0": continue
+                                if ":" in p:
+                                    ipv6 = p
+                                    break
+                return f"{ipv4},{ipv6}"
             elif command.startswith("unbrick-adapter"):
                 get_interfaces_req = subprocess.run(
                     "netsh interface ipv4 show route",

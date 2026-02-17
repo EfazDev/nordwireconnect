@@ -21,6 +21,7 @@ import platform
 import win32api # type: ignore
 import win32con # type: ignore
 import threading
+import ipaddress
 import pythoncom # type: ignore
 import win32file # type: ignore
 import win32pipe # type: ignore
@@ -96,7 +97,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.0c"
+version = "1.3.0d"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -702,9 +703,37 @@ def differ_to_config4() -> str:
     else: return "Default Location: Auto"
 
 # Connections
+def calculate_allowed_ips(include_ranges: list[str], exclude_ranges: list[str]) -> list[str]:
+    inc = [ipaddress.ip_network(n) for n in include_ranges]
+    ex = [ipaddress.ip_network(n) for n in exclude_ranges]
+    res = []
+    for ver in [4, 6]:
+        v_included = [i for i in inc if i.version == ver]
+        v_excluded = [e for e in ex if e.version == ver]
+        ver_res = []
+        for i in v_included:
+            cur_net = [i]
+            for e in v_excluded:
+                new_net = []
+                for net in cur_net:
+                    if net.overlaps(e):
+                        intersection = max(net.network_address, e.network_address)
+                        mask = max(net.prefixlen, e.prefixlen)
+                        actual_exclusion = ipaddress.ip_network(f"{intersection}/{mask}")
+                        new_net.extend(list(net.address_exclude(actual_exclusion)))
+                    else: new_net.append(net)
+                cur_net = new_net
+            ver_res.extend(cur_net)
+        res.extend(ipaddress.collapse_addresses(ver_res))
+    return [str(net) for net in res]
 def get_allowed_ips() -> str: 
-    if config_data.get("split_lan_routing"): return "0.0.0.0/5, 8.0.0.0/7, 11.0.0.0/8, 12.0.0.0/6, 16.0.0.0/4, 32.0.0.0/3, 64.0.0.0/2, 128.0.0.0/3, 160.0.0.0/5, 168.0.0.0/6, 172.0.0.0/12, 172.32.0.0/11, 172.64.0.0/10, 172.128.0.0/9, 173.0.0.0/8, 174.0.0.0/7, 176.0.0.0/4, 192.0.0.0/9, 192.128.0.0/11, 192.160.0.0/13, 192.169.0.0/16, 192.170.0.0/15, 192.172.0.0/14, 192.176.0.0/12, 192.192.0.0/10, 193.0.0.0/8, 194.0.0.0/7, 196.0.0.0/6, 200.0.0.0/5, 208.0.0.0/4, ::/1, 8000::/2, c000::/3, e000::/4, f000::/5, f800::/6, fe00::/9, ff00::/8"
-    else: return "0.0.0.0/0, ::/0"
+    if config_data.get("split_lan_routing"): allowed = calculate_allowed_ips(["0.0.0.0/0", "::/0"], ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "fe80::/10", "::1/128"])
+    else: 
+        gateway_info = send_command("router-ip-info")
+        filtering_list = []
+        if gateway_info and "," in gateway_info: filtering_list = [ip.strip() for ip in gateway_info.split(",") if requests.get_if_ip(ip.strip())]
+        allowed = calculate_allowed_ips(["0.0.0.0/0", "::/0"], filtering_list)
+    return ", ".join(allowed)
 def convert_to_channel(hostname: str) -> int: return ((zlib.crc32(hostname.encode("utf-8")) & 0xffffffff) % 10) + 1
 def connect_server(server_name: str, exact_mode: str=None):
     config_data["server"] = server_name
@@ -1015,7 +1044,7 @@ def handle_stat_thread():
                         mainMessage("Reconnecting due to loss of connection.")
                         differ_from_status_action2()
                         continue
-                    if count % 5 == 0 and send_command("wireguard-check") == "1" and not session_data["connection_text"].startswith("Connecting"):
+                    if send_command("wireguard-check") == "1" and not session_data["connection_text"].startswith("Connecting"):
                         mainMessage("Reconnecting due to loss of VPN.")
                         differ_from_status_action2()
                         continue
