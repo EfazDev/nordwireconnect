@@ -32,7 +32,7 @@ service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-version = "1.3.0f"
+version = "1.3.0g"
 colors_class = PyKits.Colors()
 pip_class = PyKits.pip()
 
@@ -149,11 +149,14 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
             if command != "wireguard-check": info(f"Received command: {command}")
             if command == "end-wireguard":
                 end = shell_run("taskkill /IM wireguard.exe /F")
-                time.sleep(0.5)
                 scm = win32service.OpenSCManager(None, None, win32service.SC_MANAGER_ENUMERATE_SERVICE)
                 statuses = win32service.EnumServicesStatus(scm)
                 for (name, display, status) in statuses:
-                    if name.startswith("WireGuardTunnel$"): win32serviceutil.RemoveService(name)
+                    if name.startswith("WireGuardTunnel$"): 
+                        try: win32serviceutil.StopService(name)
+                        except: pass
+                        try: win32serviceutil.RemoveService(name)
+                        except: pass
                 self.connected_tunnel = None
                 return str(end.returncode)
             elif command == "ui-opening": 
@@ -223,13 +226,17 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                                 p = p.strip()
                                 if not p: continue
                                 if p == "0.0.0.0": continue
-                                if p.count(".") == 3: ipv4 = p
+                                if p.count(".") == 3: 
+                                    ipv4 = p
+                                    break
                         elif not ipv6 and "::/0" in l and parsing_mode == 2:
                             for p in l.split(" "):
                                 p = p.strip()
                                 if not p: continue
                                 if p == "::/0": continue
-                                if ":" in p: ipv6 = p
+                                if ":" in p: 
+                                    ipv6 = p
+                                    break
                 return f"{ipv4},{ipv6}"
             elif command.startswith("unbrick-adapter"):
                 get_interfaces_req = subprocess.run(
