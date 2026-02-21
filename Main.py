@@ -97,7 +97,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.0h"
+version = "1.3.0i"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -727,7 +727,7 @@ def calculate_allowed_ips(include_ranges: list[str], exclude_ranges: list[str]) 
         res.extend(ipaddress.collapse_addresses(ver_res))
     return [str(net) for net in res]
 def get_allowed_ips() -> str: 
-    if config_data.get("split_lan_routing"): allowed = calculate_allowed_ips(["0.0.0.0/0", "::/0"], ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "fe80::/10", "::1/128"])
+    if config_data.get("split_lan_routing"): allowed = calculate_allowed_ips(["0.0.0.0/0", "::/0"], ["10.0.0.0/14", "10.4.0.0/16", "10.6.0.0/15", "10.8.0.0/13", "10.16.0.0/12", "10.32.0.0/11", "10.64.0.0/10", "10.128.0.0/9", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "fe80::/10", "::1/128"])
     else: 
         gateway_info = send_command("router-ip-info")
         filtering_list = []
