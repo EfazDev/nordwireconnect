@@ -32,7 +32,7 @@ service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-version = "1.3.0i"
+version = "1.3.0"
 colors_class = PyKits.Colors()
 pip_class = PyKits.pip()
 
