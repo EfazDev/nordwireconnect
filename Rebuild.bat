@@ -9,6 +9,7 @@ pyinstaller ^
     NordWireConnect.spec
 signtool sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "Installer\NordWireConnect\NordWireConnect.exe"
 signtool sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "Installer\NordWireConnect\NordWireConnectService.exe"
+mkdir dist
 
 rem Create NordWireConnect Installation ZIP
 powershell Compress-Archive -Path Installer\NordWireConnect\* -Update -DestinationPath dist\NordWireConnect.zip

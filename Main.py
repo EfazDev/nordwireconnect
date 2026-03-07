@@ -52,6 +52,7 @@ config_data = {
     "openvpn_username": "",
     "openvpn_password": "",
     "nordvpn_email": "",
+    "persistent_keepalive": 25,
     "last_version": None,
     "dns": "103.86.96.100, 103.86.99.100", # NordVPN DNS
     "server": "auto",
@@ -72,6 +73,7 @@ config_data_type_allowed = {
     "openvpn_username": typing.Union[str, None],
     "openvpn_password": typing.Union[str, None],
     "nordvpn_email": typing.Union[str, None],
+    "persistent_keepalive": int,
     "dns": str,
     "last_version": typing.Union[str, None],
     "server": typing.Union[str, None],
@@ -97,7 +99,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.0"
+version = "1.3.1a"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -395,12 +397,42 @@ def worker():
         except Exception as e: errorMessage(f"Error while running worker ({getattr(func, "__name__")}): {str(e)}")
         finally: work_queue.task_done()
 def get_latest_version() -> dict:
-    if tunnel_check(timeout=1):
-        latest_version = requests.get("https://raw.githubusercontent.com/EfazDev/nordwireconnect/refs/heads/main/Version.json")
-        if latest_version.ok: 
-            res = latest_version.json
-            for v in res.get("versions", []):
-                if v.get("version") and v.get("beta", False) == config_data.get("beta_updates", False): return v
+    try:
+        if tunnel_check(timeout=1):
+            latest_version = requests.get("https://raw.githubusercontent.com/EfazDev/nordwireconnect/refs/heads/main/Version.json")
+            if latest_version.ok: 
+                res = latest_version.json
+                for v in res.get("versions", []):
+                    if v.get("version") and v.get("beta", False) == config_data.get("beta_updates", False): return v
+    except Exception as e: errorMessage(f"Error while trying to check for updates: {str(e)}")
+def get_latest_wireguard_version() -> dict:
+    try:
+        if tunnel_check(timeout=1):
+            latest_version = requests.get("https://build.wireguard.com/distros.json")
+            if latest_version.ok: 
+                res = latest_version.json
+                if res.get("windowsdl-win"):
+                    v = res.get("windowsdl-win", {})
+                    if v.get("uptodate") and v.get("version"): return v
+    except Exception as e: errorMessage(f"Error while trying to check for updates: {str(e)}")
+def get_current_wireguard_version() -> typing.Union[str, None]:
+    for p in [
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        r"SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+    ]:
+        try:
+            root_key = win32api.RegOpenKey(win32con.HKEY_LOCAL_MACHINE, p)
+            for i in range(win32api.RegQueryInfoKey(root_key)[0]):
+                subkey_name = win32api.RegEnumKey(root_key, i)
+                subkey = win32api.RegOpenKey(root_key, subkey_name)
+                try:
+                    name = win32api.RegQueryValueEx(subkey, "DisplayName")[0]
+                    if "WireGuard" in name: return win32api.RegQueryValueEx(subkey, "DisplayVersion")[0]
+                except Exception: continue
+                win32api.RegCloseKey(subkey)
+            win32api.RegCloseKey(root_key)
+        except Exception: continue
+    return None
 def auto_check_for_updates():
     latest_version = get_latest_version()
     if latest_version and latest_version["version"] > version: 
@@ -412,7 +444,11 @@ def tkinter_install_updates(latest_ver: str):
             installer_path = os.path.join(app_data_path, "NordWireConnectInstaller.exe")
             download_progress = requests.download(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe", installer_path)
             if download_progress.ok:
-                disconnect()
+                if config_data.get("auto_connect", True): disconnect(only_disconnect=True)
+                else:
+                    disconnect()
+                    sess = os.path.join(app_data_path, "NordSessionData.json")
+                    if os.path.exists(sess): os.remove(sess)
                 ctypes.windll.shell32.ShellExecuteW(
                     None,
                     "runas",
@@ -424,6 +460,43 @@ def tkinter_install_updates(latest_ver: str):
             else: 
                 if os.path.exists(installer_path): os.remove(installer_path)
                 errorMessage("Unable to download NordWireConnectInstaller from GitHub!")
+    except Exception as e: errorMessage(f"Unable to check for new updates due to an exception: {str(e)}")
+def tkinter_install_wireguard_updates(latest_ver: str):
+    try:
+        confirmed = messagebox.askyesno("Wireguard Update Available!", f"Wireguard v{latest_ver['version']} is now available to be downloaded!\nDo you wish to proceed?", icon="info")
+        if confirmed:
+            download_url = "https://download.wireguard.com/windows-client/wireguard-installer.exe"
+            installer_path = os.path.join(app_data_path, "wireguard-installer.exe")
+            mainMessage("Downloading WireGuard installer...")
+            download = requests.download(download_url, installer_path)
+            if download.ok:
+                mainMessage("Installing WireGuard...")
+                proc = winshell.ShellExecuteEx(
+                    lpVerb="runas",
+                    lpFile=installer_path,
+                    lpParameters="",
+                    nShow=win32con.SW_SHOWNORMAL,
+                    fMask=0x00000040
+                )
+                handle = proc["hProcess"]
+                win32event.WaitForSingleObject(handle, win32event.INFINITE)
+                wireguard_exit_code = win32process.GetExitCodeProcess(handle)
+                send_command("combined-end-wireguard")
+                time.sleep(1)
+                if os.path.exists(installer_path): os.remove(installer_path)
+                if wireguard_exit_code == 0:
+                    mainMessage("WireGuard installed successfully.")
+                    time.sleep(3)
+                else:
+                    errorMessage("Failed to install WireGuard.")
+                    mark_not_connected()
+                    set_icon("error.ico")
+                    return
+            else:
+                errorMessage("Failed to download WireGuard installer.")
+                mark_not_connected()
+                set_icon("error.ico")
+                return
     except Exception as e: errorMessage(f"Unable to check for new updates due to an exception: {str(e)}")
 def check_for_updates():
     try:
@@ -437,6 +510,20 @@ def check_for_updates():
             if not test_available.ok: errorMessage("I'm sorry! The latest version is currently unavailable to be downloaded. Please check back later!")
             tk_root.after(100, tkinter_install_updates, latest_ver)
         else: errorMessage("You're already on the latest version of NordWireConnect!")
+    except Exception as e: errorMessage(f"Unable to check for new updates due to an exception: {str(e)}")
+def check_for_wireguard_updates():
+    try:
+        latest_version = get_latest_wireguard_version()
+        current_version = get_current_wireguard_version()
+        if not latest_version:
+            errorMessage("Unable to check for new updates! Check your internet connection..")
+            return
+        if not current_version:
+            tk_root.after(100, tkinter_install_wireguard_updates, latest_version)
+            return
+        if latest_version["version"] > current_version: 
+            tk_root.after(100, tkinter_install_wireguard_updates, latest_version)
+        else: errorMessage("You're already on the latest version of Wireguard!")
     except Exception as e: errorMessage(f"Unable to check for new updates due to an exception: {str(e)}")
 def reset_dns_cache():
     try:
@@ -463,12 +550,26 @@ def clear_configuration():
     try:
         confirmed = messagebox.askyesno("Clear Configuration", f"Are you sure you want to clear all NordWireConnect configuration data?", icon="question")
         if confirmed:
-            disconnect(only_disconnect=True)
+            disconnect()
             mainMessage("Clearing configuration data..")
             config_path = os.path.join(app_data_path, "ConnectConfig.json")
             if os.path.exists(config_path):
                 with open(config_path, "w") as f: f.write("{}")
             config_data.clear()
+            load_configuration()
+            update_tray()
+    except Exception as e: errorMessage(f"Unable to clear configuration data: {str(e)}")
+def clear_configuration_except_account():
+    try:
+        confirmed = messagebox.askyesno("Clear Configuration (except Account)", f"Are you sure you want to clear all NordWireConnect configuration data except your NordVPN Account Authentication Data?", icon="question")
+        if confirmed:
+            disconnect()
+            mainMessage("Clearing configuration data (without account)..")
+            config_path = os.path.join(app_data_path, "ConnectConfig.json")
+            for k in config_data.keys():
+                if k not in ["access_token","username","openvpn_username","openvpn_password","nordvpn_email"]:
+                    config_data[k] = None
+            with open(config_path, "w") as f: json.dump(config_data)
             load_configuration()
             update_tray()
     except Exception as e: errorMessage(f"Unable to clear configuration data: {str(e)}")
@@ -534,7 +635,7 @@ def get_if_virtual_location(server: dict) -> bool:
                 if val["value"] == "true": return True
     return False
 def change_dns():
-    inputted = simpledialog.askstring(title="DNS Input", prompt="Enter IPv4 DNS servers to use (comma separated):")
+    inputted = simpledialog.askstring(title="DNS Input", prompt="Enter IPv4 DNS servers to use (comma separated):", initialvalue="103.86.96.100, 103.86.99.100")
     ips = inputted.replace(" ", "").split(",")
     added = [ip for ip in ips if requests.get_if_ip(ip)]
     if added:
@@ -545,7 +646,7 @@ def change_dns():
     else: errorMessage("No valid IPv4 DNS servers were provided.")
 def change_access_token():
     global private_key
-    inputted = simpledialog.askstring(title="Access Token Input", prompt="Enter your generated NordVPN Access Token from the NordVPN website (https://my.nordaccount.com/dashboard/nordvpn/):")
+    inputted = simpledialog.askstring(title="Access Token Input", prompt="Enter your generated NordVPN Access Token from the NordVPN website (https://my.nordaccount.com/dashboard/nordvpn/):", show="*")
     if len(inputted) > 50:
         test_request = requests.get(f"https://api.nordvpn.com/v1/users/services/credentials", auth=["token", inputted])
         if test_request.ok:
@@ -559,14 +660,14 @@ def change_access_token():
                 config_data["username"] = test_request2.get("username", "")
                 config_data["access_token"] = inputted
                 private_key = test_request.get("nordlynx_private_key", "")
-                successMessageBox("Successfully changed NordVPN Access Token!", "NordWireConnect")
+                successMessageBox(f"Successfully logged into {test_request2.get('email')}!", "NordWireConnect")
                 save_configuration()
                 update_tray()
             else: errorMessage("The provided NordVPN Access Token is invalid.")
         else: errorMessage("The provided NordVPN Access Token is invalid.")
     else: errorMessage("The provided NordVPN Access Token is invalid.")
 def change_connection_channel():
-    inputted = simpledialog.askstring(title="Connection Channel Input", prompt="Enter the Connection Channel you would like to assign this computer (1-10) (enter \"none\" for no channels):")
+    inputted = simpledialog.askstring(title="Connection Channel Input", prompt="Enter the Connection Channel you would like to assign this computer (1-10) (enter \"none\" for no channels):", initialvalue="none")
     try:
         if inputted.lower() == "none":
             config_data["connection_channel"] = None
@@ -581,6 +682,16 @@ def change_connection_channel():
             save_configuration()
             update_tray()
         else: errorMessage("The given channel number is not in range from 1 to 10.")
+    except Exception as e: errorMessage("The given channel number is invalid.")
+def change_keepalive():
+    inputted = simpledialog.askinteger(title="Persistent Keepalive Input", prompt="Enter the amount of keepalive (seconds) you would like to set (1-999):", initialvalue=25, minvalue=1, maxvalue=999)
+    try:
+        if inputted >= 1 and inputted <= 999:
+            config_data["persistent_keepalive"] = inputted
+            successMessageBox(f"Successfully changed Persistent Keepalive to {inputted}!", "NordWireConnect")
+            save_configuration()
+            update_tray()
+        else: errorMessage("The given channel number is not in range from 1 to 999.")
     except Exception as e: errorMessage("The given channel number is invalid.")
 def default_location(server_name: str, exact_mode: str=None): 
     if exact_mode: config_data["default_location"] = f"{exact_mode}_{server_name}"
@@ -675,28 +786,29 @@ def differ_from_status_action2():
     def pre_connect(): connect(exact_mode=session_data.get("exact_connect"))
     addToThread(pre_connect, (), connection=True)
 def differ_to_status(): return session_data["connection_text"]
-def differ_to_status1() -> str:
+def differ_to_city() -> str:
     if session_data["connected"] == True: return f"City: {session_data['server']['locations'][0]['country']['city']['name']}"
     else: return "City: N/A"
-def differ_to_status2() -> str: 
+def differ_to_ip_add() -> str: 
     if session_data["connected"] == True: return f"IP Address: {session_data['server']['station']}"
     else: return "IP Address: N/A"
-def differ_to_status3() -> str: 
+def differ_to_hostname() -> str: 
     if session_data["connected"] == True: return f"Hostname: {session_data['server']['hostname']}"
     else: return "Hostname: N/A"
-def differ_to_status4() -> str: 
+def differ_to_load() -> str: 
     if session_data["connected"] == True: return f"Load: {session_data['current_load']}%"
     else: return "Load: N/A"
-def differ_to_status5() -> str: 
+def differ_to_session_time() -> str: 
     if session_data["connected"] == True: return f"Session Time: {format_seconds(session_data['session_time'])}"
     else: return "Session Time: N/A"
-def differ_to_status6() -> str: 
+def differ_to_data_usage() -> str: 
     if session_data["connected"] == True: return f"Data Usage: {session_data.get('download_data_usage', 'N/A')} ⬇️, {session_data.get('upload_data_usage', 'N/A')} ⬆️"
     else: return "Data Usage: N/A"
-def differ_to_config1() -> str: return f"DNS Servers: {config_data['dns']}"
-def differ_to_config2() -> str: return f"Account: {config_data.get('username', 'N/A')} (Token {len(config_data['access_token']) > 60 and 'Given' or 'Ungiven'})"
-def differ_to_config3() -> str: return f"Connection Channel: {config_data.get('connection_channel', 'N/A')}"
-def differ_to_config4() -> str: 
+def differ_to_dns() -> str: return f"DNS Servers: {config_data['dns']}"
+def differ_to_nord_acc() -> str: return f"Account: {config_data.get('username', 'N/A')} (Token {len(config_data['access_token']) > 60 and 'Given' or 'Ungiven'})"
+def differ_to_channel() -> str: return f"Connection Channel: {config_data.get('connection_channel', 'N/A')}"
+def differ_to_keepalive() -> str: return f"Persistent Keepalive: {config_data.get('persistent_keepalive', 25)}"
+def differ_to_def_loc() -> str: 
     if config_data.get("default_location") and config_data["default_location"].lower() != "auto":
         _, server_loc = config_data["default_location"].split("_")
         return f"Default Location: {server_loc}"
@@ -963,7 +1075,7 @@ PostDown = echo Disconnected > "{os.path.join(app_data_path, 'ConnectionStatus')
 PublicKey = {wireguard_metadata[0].get("value")}
 Endpoint = {s.get('hostname')}:51820
 AllowedIPs = {get_allowed_ips()}
-PersistentKeepalive = 10"""
+PersistentKeepalive = {config_data.get('persistent_keepalive', 25)}"""
             config_path = os.path.join(app_data_path, f"{shortened_name}.{city_name}.conf")
             with open(config_path, "w") as f: f.write(configuration)
             if session_data["connection_text"] == "Not Connected" and session_data["connected"] == False: break
@@ -1040,7 +1152,7 @@ def handle_stat_thread():
                 count += 1
                 since_connected += 1
                 if config_data.get("loss_connect_protection", True) == True:
-                    if count % 10 == 0 and not tunnel_check() and not session_data["connection_text"].startswith("Connecting"):
+                    if count % 10 == 0 and not tunnel_check() and not tunnel_check(timeout=2) and not tunnel_check(timeout=2) and not session_data["connection_text"].startswith("Connecting"):
                         mainMessage("Reconnecting due to loss of connection.")
                         differ_from_status_action2()
                         continue
@@ -1194,30 +1306,33 @@ def app():
             menu=pystray.Menu(
                 pystray.MenuItem("NordWireConnect", lambda icon, item: None, enabled=False),
                 pystray.MenuItem(unicon(differ_to_status), lambda icon, item: None, enabled=False),
-                pystray.MenuItem(unicon(differ_to_status1), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
-                pystray.MenuItem(unicon(differ_to_status2), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
-                pystray.MenuItem(unicon(differ_to_status3), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
-                pystray.MenuItem(unicon(differ_to_status4), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
-                pystray.MenuItem(unicon(differ_to_status5), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
-                pystray.MenuItem(unicon(differ_to_status6), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
+                pystray.MenuItem(unicon(differ_to_city), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
+                pystray.MenuItem(unicon(differ_to_ip_add), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
+                pystray.MenuItem(unicon(differ_to_hostname), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
+                pystray.MenuItem(unicon(differ_to_load), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
+                pystray.MenuItem(unicon(differ_to_session_time), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
+                pystray.MenuItem(unicon(differ_to_data_usage), lambda icon, item: None, enabled=False, visible=lambda icon: session_data["connected"] == True),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem(unicon(differ_from_status_text), create_mini_func(differ_from_status_action, connected=True)),
                 pystray.MenuItem("Reconnect Servers", create_mini_func(differ_from_status_action2, connected=True), visible=lambda icon: session_data["connected"] == True),
                 pystray.MenuItem("Servers", lambda icon, item: tk_root.after(0, connect_selected_server_button)),
                 pystray.MenuItem("Configuration", pystray.Menu(
-                    pystray.MenuItem(unicon(differ_to_config1), lambda icon, item: None, enabled=False),
-                    pystray.MenuItem(unicon(differ_to_config2), lambda icon, item: None, enabled=False),
-                    pystray.MenuItem(unicon(differ_to_config3), lambda icon, item: None, enabled=False),
+                    pystray.MenuItem(unicon(differ_to_dns), lambda icon, item: None, enabled=False),
+                    pystray.MenuItem(unicon(differ_to_nord_acc), lambda icon, item: None, enabled=False),
+                    pystray.MenuItem(unicon(differ_to_channel), lambda icon, item: None, enabled=False),
+                    pystray.MenuItem(unicon(differ_to_keepalive), lambda icon, item: None, enabled=False),
                     pystray.Menu.SEPARATOR,
                     pystray.MenuItem("Change DNS Servers", lambda icon, item: tk_root.after(0, change_dns)),
                     pystray.MenuItem("Change Access Token", lambda icon, item: tk_root.after(0, change_access_token)),
                     pystray.MenuItem("Change Connection Channel", lambda icon, item: tk_root.after(0, change_connection_channel)),
-                    pystray.MenuItem(unicon(differ_to_config4), lambda icon, item: tk_root.after(0, save_auto_selected_server_button)),
+                    pystray.MenuItem("Change Persistent Keepalive", lambda icon, item: tk_root.after(0, change_keepalive)),
+                    pystray.MenuItem(unicon(differ_to_def_loc), lambda icon, item: tk_root.after(0, save_auto_selected_server_button)),
                     pystray.MenuItem("Set Shortcuts", create_mini_func(unicon(setup_shortcuts, [True]))),
                     pystray.MenuItem("Brute End Wireguard", create_mini_func(brute_end_wireguard)),
                     pystray.MenuItem("Reset DNS Cache", lambda icon, item: unicon(reset_dns_cache)),
                     pystray.MenuItem("Reset Windows Networking", lambda icon, item: tk_root.after(0, reset_windows_networking)),
                     pystray.MenuItem("Clear Configuration", lambda icon, item: tk_root.after(0, clear_configuration)),
+                    pystray.MenuItem("Clear Configuration (except Account)", lambda icon, item: tk_root.after(0, clear_configuration_except_account)),
                     pystray.Menu.SEPARATOR,
                     pystray.MenuItem("Load Swapping", unicon(change_load_swapping), checked=unicon(check_load_swapping), radio=True),
                     pystray.MenuItem("Auto Reconnect", unicon(change_auto_connect), checked=unicon(check_auto_connect), radio=True),
@@ -1230,6 +1345,7 @@ def app():
                 )),
                 pystray.MenuItem("About NordWireConnect", unicon(about)),
                 pystray.MenuItem("Check for Updates", unicon(check_for_updates)),
+                pystray.MenuItem("Check for Wireguard Updates", unicon(check_for_wireguard_updates)),
                 pystray.MenuItem("Quit", unicon(quit_app))
             )
         )
