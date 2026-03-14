@@ -99,7 +99,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1a"
+version = "1.3.1b"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -176,7 +176,9 @@ def unneeding_state(): ctypes.windll.kernel32.SetThreadExecutionState(0x80000000
 def quit_app():
     global stop_app
     try:
-        if config_data.get("auto_connect", True): disconnect(only_disconnect=True)
+        if config_data.get("auto_connect", True): 
+            session_data["connected"] = False
+            disconnect(only_disconnect=True)
         else:
             disconnect()
             sess = os.path.join(app_data_path, "NordSessionData.json")
@@ -439,16 +441,20 @@ def auto_check_for_updates():
         notification("Update Available!", f"NordWireConnect v{latest_version['version']} is now available for download!")
 def tkinter_install_updates(latest_ver: str):
     try:
+        mainMessage(f"Update v{latest_ver} is now available!")
         confirmed = messagebox.askyesno("Update Available!", f"NordWireConnect v{latest_ver} is now available to be downloaded from GitHub!\nDo you wish to proceed?", icon="info")
         if confirmed:
             installer_path = os.path.join(app_data_path, "NordWireConnectInstaller.exe")
             download_progress = requests.download(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe", installer_path)
             if download_progress.ok:
-                if config_data.get("auto_connect", True): disconnect(only_disconnect=True)
+                if config_data.get("auto_connect", True): 
+                    session_data["connected"] = False
+                    disconnect(only_disconnect=True)
                 else:
                     disconnect()
                     sess = os.path.join(app_data_path, "NordSessionData.json")
                     if os.path.exists(sess): os.remove(sess)
+                if pystray_icon: pystray_icon.stop()
                 ctypes.windll.shell32.ShellExecuteW(
                     None,
                     "runas",
@@ -569,7 +575,7 @@ def clear_configuration_except_account():
             for k in config_data.keys():
                 if k not in ["access_token","username","openvpn_username","openvpn_password","nordvpn_email"]:
                     config_data[k] = None
-            with open(config_path, "w") as f: json.dump(config_data)
+            with open(config_path, "w") as f: json.dump(config_data, f)
             load_configuration()
             update_tray()
     except Exception as e: errorMessage(f"Unable to clear configuration data: {str(e)}")
@@ -839,7 +845,7 @@ def calculate_allowed_ips(include_ranges: list[str], exclude_ranges: list[str]) 
         res.extend(ipaddress.collapse_addresses(ver_res))
     return [str(net) for net in res]
 def get_allowed_ips() -> str: 
-    if config_data.get("split_lan_routing"): allowed = calculate_allowed_ips(["0.0.0.0/0", "::/0"], ["10.0.0.0/14", "10.4.0.0/16", "10.6.0.0/15", "10.8.0.0/13", "10.16.0.0/12", "10.32.0.0/11", "10.64.0.0/10", "10.128.0.0/9", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "fe80::/10", "::1/128"])
+    if config_data.get("split_lan_routing"): allowed = calculate_allowed_ips(["0.0.0.0/0", "::/0"], ["10.0.0.0/14", "10.4.0.0/16", "10.6.0.0/15", "10.8.0.0/13", "10.16.0.0/12", "10.32.0.0/11", "10.64.0.0/10", "10.128.0.0/9", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10", "::1/128"])
     else: 
         gateway_info = send_command("router-ip-info")
         filtering_list = []
@@ -1073,7 +1079,7 @@ PostDown = echo Disconnected > "{os.path.join(app_data_path, 'ConnectionStatus')
 
 [Peer]
 PublicKey = {wireguard_metadata[0].get("value")}
-Endpoint = {s.get('hostname')}:51820
+Endpoint = {s.get('station')}:51820
 AllowedIPs = {get_allowed_ips()}
 PersistentKeepalive = {config_data.get('persistent_keepalive', 25)}"""
             config_path = os.path.join(app_data_path, f"{shortened_name}.{city_name}.conf")
@@ -1185,10 +1191,12 @@ def handle_stat_thread():
                         session_data["download_data_usage"] = data_usage[0]
                         session_data["upload_data_usage"] = data_usage[1]
                 session_data["session_time"] = since_connected
+                pystray_icon.title = f"NordWireConnect\nConnected to {session_data['server']['name']}!\nCity: {session_data['server']['locations'][0]['country']['city']['name']}"
                 update_tray()
             else:
                 count = 0
                 since_connected = 0
+                pystray_icon.title = "NordWireConnect"
         except Exception: pass
 def tunnel_check(timeout: int=5): return requests.get_if_connected(server="1.1.1.1", timeout=timeout)
 
