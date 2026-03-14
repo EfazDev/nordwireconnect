@@ -8,6 +8,7 @@ https://www.efaz.dev
 # Modules
 import os
 import sys
+import copy
 import json
 import time
 import zlib
@@ -46,7 +47,7 @@ app_data_path = os.path.join(pip_class.getLocalAppData(), "NordWireConnect")
 wireguard_location = os.path.join(pre_program_files, "WireGuard")
 program_files = os.path.join(pre_program_files, "NordWireConnect")
 private_key = None
-config_data = {
+base_config = {
     "access_token": "",
     "username": "",
     "openvpn_username": "",
@@ -67,6 +68,7 @@ config_data = {
     "check_for_updates": True,
     "beta_updates": False
 }
+config_data = copy.deepcopy(base_config)
 config_data_type_allowed = {
     "access_token": typing.Union[str, None],
     "username": typing.Union[str, None],
@@ -99,7 +101,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1b"
+version = "1.3.1c"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -554,15 +556,13 @@ def reset_windows_networking():
     except Exception as e: errorMessage(f"Unable to reset Windows Networking: {str(e)}")
 def clear_configuration():
     try:
+        global config_data
         confirmed = messagebox.askyesno("Clear Configuration", f"Are you sure you want to clear all NordWireConnect configuration data?", icon="question")
         if confirmed:
             disconnect()
             mainMessage("Clearing configuration data..")
-            config_path = os.path.join(app_data_path, "ConnectConfig.json")
-            if os.path.exists(config_path):
-                with open(config_path, "w") as f: f.write("{}")
-            config_data.clear()
-            load_configuration()
+            config_data = copy.deepcopy(base_config)
+            save_configuration()
             update_tray()
     except Exception as e: errorMessage(f"Unable to clear configuration data: {str(e)}")
 def clear_configuration_except_account():
@@ -574,7 +574,7 @@ def clear_configuration_except_account():
             config_path = os.path.join(app_data_path, "ConnectConfig.json")
             for k in config_data.keys():
                 if k not in ["access_token","username","openvpn_username","openvpn_password","nordvpn_email"]:
-                    config_data[k] = None
+                    config_data[k] = base_config.get(k)
             with open(config_path, "w") as f: json.dump(config_data, f)
             load_configuration()
             update_tray()

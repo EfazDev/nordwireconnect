@@ -2,6 +2,10 @@
     "version": "1.3.0",
     "versions": [
         {
+            "version": "1.3.1c",
+            "beta": true
+        },
+        {
             "version": "1.3.1b",
             "beta": true
         },
