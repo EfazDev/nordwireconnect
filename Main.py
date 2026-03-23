@@ -101,7 +101,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1c"
+version = "1.3.1d"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -1068,6 +1068,7 @@ def connect(exact_mode: str=None):
                     wireguard_metadata = m.get("metadata", {})
                     break
             if not wireguard_metadata: continue
+            wait_until_connected()
             configuration = f"""# {shortened_name}.{city_name}.conf
 [Interface]
 PrivateKey = {private_key}
@@ -1082,6 +1083,7 @@ PublicKey = {wireguard_metadata[0].get("value")}
 Endpoint = {s.get('station')}:51820
 AllowedIPs = {get_allowed_ips()}
 PersistentKeepalive = {config_data.get('persistent_keepalive', 25)}"""
+            if not server_check(server=s.get('station')): continue
             config_path = os.path.join(app_data_path, f"{shortened_name}.{city_name}.conf")
             with open(config_path, "w") as f: f.write(configuration)
             if session_data["connection_text"] == "Not Connected" and session_data["connected"] == False: break
@@ -1199,6 +1201,14 @@ def handle_stat_thread():
                 pystray_icon.title = "NordWireConnect"
         except Exception: pass
 def tunnel_check(timeout: int=5): return requests.get_if_connected(server="1.1.1.1", timeout=timeout)
+def server_check(server: str="1.1.1.1", timeout: int=5): 
+    c = 0
+    while c < 3:
+        if requests.get_if_connected(server=server, timeout=timeout): c += 1
+        time.sleep(0.1)
+    return False
+def wait_until_connected(): 
+    while not requests.get_if_connected(): time.sleep(0.1)
 
 # Main Runtime
 def app():

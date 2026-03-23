@@ -32,7 +32,7 @@ service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-version = "1.3.1c"
+version = "1.3.1d"
 colors_class = PyKits.Colors()
 pip_class = PyKits.pip()
 
@@ -88,20 +88,29 @@ def create_pipe_sa():
     return sa
 
 # Unbricking
-def shell_run(cmd: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        cmd,
-        shell=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+def shell_run(cmd: str | list) -> subprocess.CompletedProcess[str]:
+    if type(cmd) is list:
+        s = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True
+        )
+    else:
+        s = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True
+        )
+    if s.returncode != 0: error(f"Command failed ({cmd}): {s.stderr.strip()}")
+    return s
 def check_for_unbricks(idx: str) -> bool:
-    out = subprocess.run(f"netsh interface ipv4 show interface {idx}", shell=True, capture_output=True, text=True).stdout.lower()
+    out = shell_run(f"netsh interface ipv4 show interface {idx}").stdout.lower()
     for ln in out.splitlines():
         if "weak host sends" in ln and "enabled" in ln: return True
         if "weak host receives" in ln and "enabled" in ln: return True
         if "forwarding" in ln and "enabled" in ln: return True
-    out = subprocess.run(f"netsh interface ipv6 show interface {idx}", shell=True, capture_output=True, text=True).stdout.lower()
+    out = shell_run(f"netsh interface ipv6 show interface {idx}").stdout.lower()
     for ln in out.splitlines():
         if "weak host sends" in ln and "enabled" in ln: return True
         if "weak host receives" in ln and "enabled" in ln: return True
@@ -179,14 +188,14 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                 return str(end.returncode)
             elif command.startswith("uninstall-wire-tunnel"):
                 command = command.split(" ")
-                remove = subprocess.run([os.path.join(wireguard_location, "wireguard.exe"), "/uninstalltunnelservice", command[1]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                remove = shell_run([os.path.join(wireguard_location, "wireguard.exe"), "/uninstalltunnelservice", command[1]])
                 if self.connected_tunnel == command[1]: self.connected_tunnel = None
                 return str(remove.returncode)
             elif command.startswith("install-wire-tunnel"):
                 self.handle_command("unbrick-adapter")
                 command = command.split(" ")
                 config_path = " ".join(command[1:])
-                add = subprocess.run([os.path.join(wireguard_location, "wireguard.exe"), "/installtunnelservice", config_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                add = shell_run([os.path.join(wireguard_location, "wireguard.exe"), "/installtunnelservice", config_path])
                 self.connected_tunnel = ".".join(os.path.basename(config_path).split(".")[:-1])
                 wait_for_service("WireGuardTunnel$" + self.connected_tunnel)
                 return str(add.returncode)
@@ -207,7 +216,7 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                 return self.handle_command("end-wireguard-installer")
             elif command.startswith("data-usage"):
                 if self.connected_tunnel:
-                    wg_check = subprocess.run([os.path.join(wireguard_location, "wg.exe"), "show"], capture_output=True, text=True)
+                    wg_check = shell_run([os.path.join(wireguard_location, "wg.exe"), "show"])
                     output = wg_check.stdout.strip()
                     lines = output.splitlines()
                     for l in lines:
@@ -215,7 +224,7 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                         if "transfer:" in l: return l.replace("transfer: ", "").replace(" received", "").replace(" sent", "").replace(", ", ",")
                 return "0,0"
             elif command.startswith("router-ip-info"):
-                route_out = subprocess.run("route print 0.0.0.0", shell=True, capture_output=True, text=True).stdout.replace("[SEPARATE]", "") + "\n[SEPARATE]\n" + subprocess.run("route print ::/0", shell=True, capture_output=True, text=True).stdout.replace("[SEPARATE]", "")
+                route_out = shell_run("route print 0.0.0.0").stdout.replace("[SEPARATE]", "") + "\n[SEPARATE]\n" + shell_run("route print ::/0").stdout.replace("[SEPARATE]", "")
                 parsing_mode = None
                 active = False
                 ipv4 = None
@@ -247,17 +256,7 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                                     break
                 return f"{ipv4},{ipv6}"
             elif command.startswith("unbrick-adapter"):
-                get_interfaces_req = subprocess.run(
-                    "netsh interface ipv4 show route",
-                    shell=True,
-                    capture_output=True,
-                    text=True
-                ).stdout + subprocess.run(
-                    "netsh interface ipv6 show route",
-                    shell=True,
-                    capture_output=True,
-                    text=True
-                ).stdout
+                get_interfaces_req = shell_run("netsh interface ipv4 show route").stdout + shell_run("netsh interface ipv6 show route").stdout
                 interface_indexes = {
                     line.split()[-2] for line in get_interfaces_req.splitlines()
                     if "0.0.0.0/0" in line or "::/0" in line
@@ -269,7 +268,7 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                     shell_run(f"netsh interface ipv6 set interface {idx} forwarding=disabled weakhostsend=disabled weakhostreceive=disabled")
                 return "0"
             elif command == "wireguard-check":
-                wg_check = subprocess.run([os.path.join(wireguard_location, "wg.exe"), "show"], capture_output=True, text=True)
+                wg_check = shell_run([os.path.join(wireguard_location, "wg.exe"), "show"])
                 output = wg_check.stdout.strip()
                 if not output: return "1"
                 elif "latest handshake: never" in output.lower(): return "1"
