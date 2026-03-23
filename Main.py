@@ -101,7 +101,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1d"
+version = "1.3.1e"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -1203,10 +1203,11 @@ def handle_stat_thread():
 def tunnel_check(timeout: int=5): return requests.get_if_connected(server="1.1.1.1", timeout=timeout)
 def server_check(server: str="1.1.1.1", timeout: int=5): 
     c = 0
-    while c < 3:
+    t = time.time()
+    while c < 3 and time.time() - t < timeout*timeout:
         if requests.get_if_connected(server=server, timeout=timeout): c += 1
         time.sleep(0.1)
-    return False
+    return c == 3
 def wait_until_connected(): 
     while not requests.get_if_connected(): time.sleep(0.1)
 
