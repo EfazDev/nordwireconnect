@@ -26,6 +26,7 @@ import ipaddress
 import pythoncom # type: ignore
 import win32file # type: ignore
 import win32pipe # type: ignore
+import webbrowser
 import subprocess
 import win32event # type: ignore
 import win32process # type: ignore
@@ -47,6 +48,7 @@ app_data_path = os.path.join(pip_class.getLocalAppData(), "NordWireConnect")
 wireguard_location = os.path.join(pre_program_files, "WireGuard")
 program_files = os.path.join(pre_program_files, "NordWireConnect")
 private_key = None
+plan_reminded = False
 base_config = {
     "access_token": "",
     "username": "",
@@ -58,12 +60,15 @@ base_config = {
     "dns": "103.86.96.100, 103.86.99.100", # NordVPN DNS
     "server": "auto",
     "auto_connect": True,
-    "notifications": False,
+    "notifications": True,
     "optimize_server_list": False,
     "default_location": "auto",
     "load_swapping": False,
     "split_lan_routing": False,
     "loss_connect_protection": True,
+    "plan_renewal_reminder": False,
+    "plan_renewal_data": None,
+    "plan_reminder_level": 5,
     "connection_channel": None,
     "check_for_updates": True,
     "beta_updates": False
@@ -86,6 +91,9 @@ config_data_type_allowed = {
     "load_swapping": bool,
     "split_lan_routing": bool,
     "loss_connect_protection": bool,
+    "plan_renewal_reminder": bool,
+    "plan_renewal_data": typing.Union[dict, None],
+    "plan_reminder_level": int,
     "connection_channel": typing.Union[int, None],
     "check_for_updates": bool,
     "beta_updates": bool
@@ -101,7 +109,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1e"
+version = "1.3.1f"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -114,7 +122,7 @@ def mainMessage(message: str): colors_class.print(message, 15)
 def errorMessage(message: str, title: str="Uh oh!"): 
     colors_class.print(message, 9)
     message = message[:256]
-    if config_data.get("notifications"): notification(title, message)
+    if config_data.get("notifications", True): notification(title, message)
     else:
         if title == "": title = "NordWireConnect"
         elif title != "NordWireConnect": title = f"NordWireConnect: {title}"
@@ -124,7 +132,7 @@ def warnMessage(message: str): colors_class.print(message, 11)
 def successMessage(message: str): colors_class.print(message, 10)
 def successMessageBox(message: str, title: str="Success!"):
     message = message[:256]
-    if config_data.get("notifications"): notification(title, message)
+    if config_data.get("notifications", True): notification(title, message)
     else:
         if title == "": title = "NordWireConnect"
         elif title != "NordWireConnect": title = f"NordWireConnect: {title}"
@@ -579,10 +587,50 @@ def clear_configuration_except_account():
             load_configuration()
             update_tray()
     except Exception as e: errorMessage(f"Unable to clear configuration data: {str(e)}")
+def get_current_time() -> datetime.datetime: return datetime.datetime.now(tz=datetime.timezone.utc)
+def get_vpn_renewal_data() -> dict:
+    try:
+        if tunnel_check(timeout=1):
+            if not config_data.get("access_token", ""): return {"active": False, "expires_at": None, "raw_expiry": "0000-00-00 00:00:00"}
+            service_data = requests.get(f"https://api.nordvpn.com/v1/users/services", auth=["token", config_data.get("access_token", "")])
+            if service_data.ok:
+                for s in service_data.json:
+                    if s.get("service", {}).get("identifier") == "vpn":
+                        expiry = convert_nordtime_to_datetime(s.get("expires_at", "0000-00-00 00:00:00"))
+                        if expiry:
+                            return {
+                                "active": True,
+                                "expires_at": expiry,
+                                "raw_expiry": s.get("expires_at", "0000-00-00 00:00:00")
+                            }
+    except Exception as e: errorMessage(f"Unable to get VPN plan renewal data: {str(e)}")
+    return {"active": False, "expires_at": None, "raw_expiry": "0000-00-00 00:00:00"}
+def refresh_plan_info():
+    global plan_reminded
+    try:
+        if config_data.get("access_token"):
+            mainMessage("Fetching Plan Renewal Information..")
+            plan_renewal_info = get_vpn_renewal_data()
+            config_data["plan_renewal_data"] = {"expiry": plan_renewal_info.get("raw_expiry"), "active": plan_renewal_info.get("active")}
+            plan_reminded = False
+        if config_data.get("plan_renewal_data", {}).get("active") and config_data.get("plan_renewal_reminder") == True:
+            cur_time = get_current_time()
+            diff = convert_nordtime_to_datetime(config_data["plan_renewal_data"]["expiry"]) - cur_time
+            if diff.days <= 1 and config_data.get("plan_reminder_level", 5) == 6: successMessageBox("Your NordVPN plan is expiring in less than a day!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
+            elif diff.days <= 3 and config_data.get("plan_reminder_level", 5) == 5: successMessageBox("Your NordVPN plan is expiring in less than 3 days!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
+            elif diff.days <= 7 and config_data.get("plan_reminder_level", 5) == 4: successMessageBox("Your NordVPN plan is expiring in less than a week!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
+            elif diff.days <= 14 and config_data.get("plan_reminder_level", 5) == 3: successMessageBox("Your NordVPN plan is expiring in less than 2 weeks!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
+            elif diff.days <= 30 and config_data.get("plan_reminder_level", 5) == 2: successMessageBox("Your NordVPN plan is expiring in less than 1 month!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
+            elif diff.days <= 60 and config_data.get("plan_reminder_level", 5) == 1: successMessageBox("Your NordVPN plan is expiring in less than 2 months!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
+            elif diff.days <= 120 and config_data.get("plan_reminder_level", 5) == 0: successMessageBox("Your NordVPN plan is expiring in less than 4 months!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
+            else: plan_reminded = False
+        save_configuration()
+    except Exception as e: errorMessage(f"Unable to load plan information. Exception: {str(e)}")
 
 # Data Handling
 def session_data_modified():
     with open(os.path.join(app_data_path, "NordSessionData.json"), "w") as f: json.dump(session_data, f, indent=4)
+def convert_nordtime_to_datetime(time_str: str) -> datetime.datetime: return datetime.datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
 def run_cache():
     mainMessage("Updating NordVPN server cache..")
     while not tunnel_check(timeout=1): time.sleep(0.1)
@@ -699,6 +747,9 @@ def change_keepalive():
             update_tray()
         else: errorMessage("The given channel number is not in range from 1 to 999.")
     except Exception as e: errorMessage("The given channel number is invalid.")
+def open_nord_dashboard():
+    try: webbrowser.open("https://my.nordaccount.com/dashboard/nordvpn/")
+    except Exception as e: errorMessage(f"Unable to open NordVPN Dashboard: {str(e)}")
 def default_location(server_name: str, exact_mode: str=None): 
     if exact_mode: config_data["default_location"] = f"{exact_mode}_{server_name}"
     else: config_data["default_location"] = server_name
@@ -732,10 +783,10 @@ def change_auto_connect():
     update_tray()
 def check_auto_connect(): return config_data.get("auto_connect", True) == True
 def change_notifications():
-    config_data["notifications"] = not config_data.get("notifications", False)
+    config_data["notifications"] = not config_data.get("notifications", True)
     save_configuration()
     update_tray()
-def check_notifications(): return config_data.get("notifications", False) == True
+def check_notifications(): return config_data.get("notifications", True) == True
 def change_server_list():
     config_data["optimize_server_list"] = not config_data.get("optimize_server_list", False)
     addToThread(run_cache, ())
@@ -758,11 +809,21 @@ def change_loss_connect_protection():
     save_configuration()
     update_tray()
 def check_loss_connect_protection(): return config_data.get("loss_connect_protection", True) == True
+def change_plan_renewal_reminder():
+    config_data["plan_renewal_reminder"] = not config_data.get("plan_renewal_reminder", True)
+    save_configuration()
+    update_tray()
+def check_plan_renewal_reminder(): return config_data.get("plan_renewal_reminder", True) == True
 def change_beta_updates():
     config_data["beta_updates"] = not config_data.get("beta_updates", False)
     save_configuration()
     update_tray()
 def check_beta_updates(): return config_data.get("beta_updates", False) == True
+def change_reminder_level(level_index):
+    config_data["plan_reminder_level"] = level_index
+    save_configuration()
+    update_tray()
+def check_reminder_level(level_index): return config_data.get("plan_reminder_level", 5) == level_index
 
 # Differenting Status
 def differ_from_status_text() -> str:
@@ -819,6 +880,29 @@ def differ_to_def_loc() -> str:
         _, server_loc = config_data["default_location"].split("_")
         return f"Default Location: {server_loc}"
     else: return "Default Location: Auto"
+def differ_to_renewal_active() -> str:
+    if config_data.get("plan_renewal_data", {}).get("active"): return "Plan Active: True"
+    else: return "Plan Active: False"
+def differ_to_renewal_date() -> str:
+    if config_data.get("plan_renewal_data", {}).get("active") and config_data["plan_renewal_data"].get("expiry"):
+        expiry_date = convert_nordtime_to_datetime(config_data["plan_renewal_data"]["expiry"])
+        return f"Plan Renewal Date: {expiry_date.astimezone().strftime('%a %B %d, %Y at %H:%M:%S')}"
+    else: return "Plan Renewal Date: N/A"
+def differ_to_renewal_remaining() -> str:
+    if config_data.get("plan_renewal_data", {}).get("active") and config_data["plan_renewal_data"].get("expiry"):
+        current_date = get_current_time()
+        expiry_date = convert_nordtime_to_datetime(config_data["plan_renewal_data"]["expiry"])
+        time_diff = expiry_date - current_date
+        str_list = []
+        if time_diff.days > 0: str_list.append(f"{time_diff.days} days")
+        hours = time_diff.seconds // 3600
+        if hours > 0: str_list.append(f"{hours} hours")
+        minutes = (time_diff.seconds % 3600) // 60
+        if minutes > 0: str_list.append(f"{minutes} minutes")
+        seconds = time_diff.seconds % 60
+        if seconds > 0: str_list.append(f"{seconds} seconds")
+        return f"Plan Renewal Remaining: {', '.join(str_list)}"
+    else: return "Plan Renewal Remaining: N/A"
 
 # Connections
 def calculate_allowed_ips(include_ranges: list[str], exclude_ranges: list[str]) -> list[str]:
@@ -1200,6 +1284,12 @@ def handle_stat_thread():
                 since_connected = 0
                 pystray_icon.title = "NordWireConnect"
         except Exception: pass
+def handle_plan_renewal_thread():
+    while True:
+        time.sleep(60)
+        try: 
+            if config_data.get("plan_renewal_reminder", True) == True and config_data.get("plan_renewal_data", {}).get("active") == True and plan_reminded == False: refresh_plan_info()
+        except Exception: pass
 def tunnel_check(timeout: int=5): return requests.get_if_connected(server="1.1.1.1", timeout=timeout)
 def server_check(server: str="1.1.1.1", timeout: int=5): 
     c = 0
@@ -1310,6 +1400,10 @@ def app():
         mainMessage("Fetching Servers..")
         addToThread(run_cache, ())
     except Exception as e: errorMessage(f"Unable to load server list. Exception: {str(e)}"); sys.exit(1); return
+    
+    # Load Plan Information
+    try: refresh_plan_info()
+    except Exception as e: errorMessage(f"Unable to load plan information. Exception: {str(e)}")
 
     # Create Tray App
     try:
@@ -1336,31 +1430,54 @@ def app():
                 pystray.MenuItem("Reconnect Servers", create_mini_func(differ_from_status_action2, connected=True), visible=lambda icon: session_data["connected"] == True),
                 pystray.MenuItem("Servers", lambda icon, item: tk_root.after(0, connect_selected_server_button)),
                 pystray.MenuItem("Configuration", pystray.Menu(
-                    pystray.MenuItem(unicon(differ_to_dns), lambda icon, item: None, enabled=False),
-                    pystray.MenuItem(unicon(differ_to_nord_acc), lambda icon, item: None, enabled=False),
-                    pystray.MenuItem(unicon(differ_to_channel), lambda icon, item: None, enabled=False),
-                    pystray.MenuItem(unicon(differ_to_keepalive), lambda icon, item: None, enabled=False),
-                    pystray.Menu.SEPARATOR,
-                    pystray.MenuItem("Change DNS Servers", lambda icon, item: tk_root.after(0, change_dns)),
-                    pystray.MenuItem("Change Access Token", lambda icon, item: tk_root.after(0, change_access_token)),
-                    pystray.MenuItem("Change Connection Channel", lambda icon, item: tk_root.after(0, change_connection_channel)),
-                    pystray.MenuItem("Change Persistent Keepalive", lambda icon, item: tk_root.after(0, change_keepalive)),
-                    pystray.MenuItem(unicon(differ_to_def_loc), lambda icon, item: tk_root.after(0, save_auto_selected_server_button)),
-                    pystray.MenuItem("Set Shortcuts", create_mini_func(unicon(setup_shortcuts, [True]))),
-                    pystray.MenuItem("Brute End Wireguard", create_mini_func(brute_end_wireguard)),
-                    pystray.MenuItem("Reset DNS Cache", lambda icon, item: unicon(reset_dns_cache)),
-                    pystray.MenuItem("Reset Windows Networking", lambda icon, item: tk_root.after(0, reset_windows_networking)),
-                    pystray.MenuItem("Clear Configuration", lambda icon, item: tk_root.after(0, clear_configuration)),
-                    pystray.MenuItem("Clear Configuration (except Account)", lambda icon, item: tk_root.after(0, clear_configuration_except_account)),
-                    pystray.Menu.SEPARATOR,
-                    pystray.MenuItem("Load Swapping", unicon(change_load_swapping), checked=unicon(check_load_swapping), radio=True),
-                    pystray.MenuItem("Auto Reconnect", unicon(change_auto_connect), checked=unicon(check_auto_connect), radio=True),
-                    pystray.MenuItem("Notifications", unicon(change_notifications), checked=unicon(check_notifications), radio=True),
-                    pystray.MenuItem("Optimize Server List", unicon(change_server_list), checked=unicon(check_server_list), radio=True),
-                    pystray.MenuItem("Auto Check for Updates", unicon(change_autoupdates), checked=unicon(check_autoupdates), radio=True),
-                    pystray.MenuItem("Split Private LAN Routing", unicon(change_split_lan_routing), checked=unicon(check_split_lan_routing), radio=True),
-                    pystray.MenuItem("Loss Connect Protection", unicon(change_loss_connect_protection), checked=unicon(check_loss_connect_protection), radio=True),
-                    pystray.MenuItem("Beta Updates", unicon(change_beta_updates), checked=unicon(check_beta_updates), radio=True),
+                    pystray.MenuItem("Connection", pystray.Menu(
+                        pystray.MenuItem(unicon(differ_to_dns), lambda icon, item: None, enabled=False),
+                        pystray.MenuItem(unicon(differ_to_nord_acc), lambda icon, item: None, enabled=False),
+                        pystray.MenuItem(unicon(differ_to_channel), lambda icon, item: None, enabled=False),
+                        pystray.MenuItem(unicon(differ_to_keepalive), lambda icon, item: None, enabled=False),
+                        pystray.Menu.SEPARATOR,
+                        pystray.MenuItem("Change DNS Servers", lambda icon, item: tk_root.after(0, change_dns)),
+                        pystray.MenuItem("Change Access Token", lambda icon, item: tk_root.after(0, change_access_token)),
+                        pystray.MenuItem("Change Connection Channel", lambda icon, item: tk_root.after(0, change_connection_channel)),
+                        pystray.MenuItem("Change Persistent Keepalive", lambda icon, item: tk_root.after(0, change_keepalive)),
+                        pystray.MenuItem(unicon(differ_to_def_loc), lambda icon, item: tk_root.after(0, save_auto_selected_server_button)),
+                        pystray.Menu.SEPARATOR,
+                        pystray.MenuItem("Load Swapping", unicon(change_load_swapping), checked=unicon(check_load_swapping), radio=True),
+                        pystray.MenuItem("Auto Reconnect", unicon(change_auto_connect), checked=unicon(check_auto_connect), radio=True),
+                        pystray.MenuItem("Split Private LAN Routing", unicon(change_split_lan_routing), checked=unicon(check_split_lan_routing), radio=True),
+                        pystray.MenuItem("Loss Connect Protection", unicon(change_loss_connect_protection), checked=unicon(check_loss_connect_protection), radio=True),
+                    )),
+                    pystray.MenuItem("Plan", pystray.Menu(
+                        pystray.MenuItem(unicon(differ_to_renewal_active), lambda icon, item: None, enabled=False, radio=True),
+                        pystray.MenuItem(unicon(differ_to_renewal_date), lambda icon, item: None, enabled=False, radio=True),
+                        pystray.MenuItem(unicon(differ_to_renewal_remaining), lambda icon, item: None, enabled=False, radio=True),
+                        pystray.MenuItem("Plan Renewal Reminder", unicon(change_plan_renewal_reminder), checked=unicon(check_plan_renewal_reminder), radio=True),
+                        pystray.MenuItem("Reminder Level", pystray.Menu(
+                            pystray.MenuItem("Level 6 (1 day)", unicon(change_reminder_level, [6]), checked=unicon(check_reminder_level, [6]), radio=True),
+                            pystray.MenuItem("Level 5 (3 days)", unicon(change_reminder_level, [5]), checked=unicon(check_reminder_level, [5]), radio=True),
+                            pystray.MenuItem("Level 4 (1 week)", unicon(change_reminder_level, [4]), checked=unicon(check_reminder_level, [4]), radio=True),
+                            pystray.MenuItem("Level 3 (2 weeks)", unicon(change_reminder_level, [3]), checked=unicon(check_reminder_level, [3]), radio=True),
+                            pystray.MenuItem("Level 2 (1 month)", unicon(change_reminder_level, [2]), checked=unicon(check_reminder_level, [2]), radio=True),
+                            pystray.MenuItem("Level 1 (2 months)", unicon(change_reminder_level, [1]), checked=unicon(check_reminder_level, [1]), radio=True),
+                            pystray.MenuItem("Level 0 (4 months)", unicon(change_reminder_level, [0]), checked=unicon(check_reminder_level, [0]), radio=True),
+                        )),
+                        pystray.MenuItem("Refresh Plan Information", create_mini_func(refresh_plan_info)),
+                        pystray.MenuItem("Open NordVPN Dashboard", unicon(open_nord_dashboard))
+                    )),
+                    pystray.MenuItem("App", pystray.Menu(
+                        pystray.MenuItem("Notifications", unicon(change_notifications), checked=unicon(check_notifications), radio=True),
+                        pystray.MenuItem("Optimize Server List", unicon(change_server_list), checked=unicon(check_server_list), radio=True),
+                        pystray.MenuItem("Auto Check for Updates", unicon(change_autoupdates), checked=unicon(check_autoupdates), radio=True),
+                        pystray.MenuItem("Beta Updates", unicon(change_beta_updates), checked=unicon(check_beta_updates), radio=True),
+                    )),
+                    pystray.MenuItem("Tools", pystray.Menu(
+                        pystray.MenuItem("Set Shortcuts", create_mini_func(unicon(setup_shortcuts, [True]))),
+                        pystray.MenuItem("Brute End Wireguard", create_mini_func(brute_end_wireguard)),
+                        pystray.MenuItem("Reset DNS Cache", lambda icon, item: unicon(reset_dns_cache)),
+                        pystray.MenuItem("Reset Windows Networking", lambda icon, item: tk_root.after(0, reset_windows_networking)),
+                        pystray.MenuItem("Clear Configuration", lambda icon, item: tk_root.after(0, clear_configuration)),
+                        pystray.MenuItem("Clear Configuration (except Account)", lambda icon, item: tk_root.after(0, clear_configuration_except_account)),
+                    )),
                 )),
                 pystray.MenuItem("About NordWireConnect", unicon(about)),
                 pystray.MenuItem("Check for Updates", unicon(check_for_updates)),
@@ -1376,6 +1493,7 @@ def app():
         addToThread(connect_session, (), connection=True)
         threading.Thread(target=worker, daemon=True).start()
         threading.Thread(target=handle_stat_thread, daemon=True).start()
+        threading.Thread(target=handle_plan_renewal_thread, daemon=True).start()
         if config_data.get("check_for_updates", True) == True: threading.Thread(target=auto_check_for_updates, daemon=True).start()
         tk_root.after(100, check_stop_flag)
         tk_root.iconphoto(True, tk.PhotoImage(file=os.path.join(program_files, "Resources", "app_icon.png"))) 
