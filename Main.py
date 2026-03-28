@@ -109,7 +109,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1f"
+version = "1.3.1g"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -523,7 +523,9 @@ def check_for_updates():
         if latest_version["version"] > version: 
             latest_ver = latest_version["version"]
             test_available = requests.head(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe")
-            if not test_available.ok: errorMessage("I'm sorry! The latest version is currently unavailable to be downloaded. Please check back later!")
+            if not test_available.ok: 
+                errorMessage("I'm sorry! The latest version is currently unavailable to be downloaded. Please check back later!")
+                return
             tk_root.after(100, tkinter_install_updates, latest_ver)
         else: errorMessage("You're already on the latest version of NordWireConnect!")
     except Exception as e: errorMessage(f"Unable to check for new updates due to an exception: {str(e)}")
