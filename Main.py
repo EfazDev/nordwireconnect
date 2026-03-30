@@ -111,7 +111,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1h"
+version = "1.3.1i"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -1287,7 +1287,7 @@ def handle_stat_thread():
                         session_data["download_data_usage"] = data_usage[0]
                         session_data["upload_data_usage"] = data_usage[1]
                 session_data["session_time"] = since_connected
-                pystray_icon.title = f"NordWireConnect v{version}\nConnected to {session_data['server']['name']}!\nCity: {session_data['server']['locations'][0]['country']['city']['name']}\nSession Time: {format_seconds(session_data['session_time'])}\nData Usage: {session_data.get('download_data_usage', 'N/A')} ⬇️, {session_data.get('upload_data_usage', 'N/A')} ⬆️\nLoad: {session_data.get('current_load', 'N/A')}%"
+                pystray_icon.title = f"NordWireConnect v{version}\nConnected to {session_data['server']['name']}!\nCity: {session_data['server']['locations'][0]['country']['city']['name']}\nSession Time: {format_seconds(session_data['session_time'])}"
                 update_tray()
             else:
                 count = 0
