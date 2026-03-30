@@ -2,9 +2,8 @@ build
 dist
 UPX
 QuickRebuild.bat
-NordWireConnectDebug.spec
+QuickDebug.bat
 NordWireConnectInstaller.spec
-Debug.bat
 .DS_Store
 installer
 __pycache__

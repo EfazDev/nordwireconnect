@@ -55,7 +55,7 @@ base_config = {
     "openvpn_username": "",
     "openvpn_password": "",
     "nordvpn_email": "",
-    "persistent_keepalive": 25,
+    "persistent_keepalive": 10,
     "last_version": None,
     "dns": "103.86.96.100, 103.86.99.100", # NordVPN DNS
     "server": "auto",
@@ -71,7 +71,8 @@ base_config = {
     "plan_reminder_level": 5,
     "connection_channel": None,
     "check_for_updates": True,
-    "beta_updates": False
+    "beta_updates": False,
+    "debug_updates": False
 }
 config_data = copy.deepcopy(base_config)
 config_data_type_allowed = {
@@ -96,7 +97,8 @@ config_data_type_allowed = {
     "plan_reminder_level": int,
     "connection_channel": typing.Union[int, None],
     "check_for_updates": bool,
-    "beta_updates": bool
+    "beta_updates": bool,
+    "debug_updates": bool
 }
 session_data = {
     "connected": False,
@@ -109,7 +111,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1g"
+version = "1.3.1h"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -415,7 +417,7 @@ def get_latest_version() -> dict:
             if latest_version.ok: 
                 res = latest_version.json
                 for v in res.get("versions", []):
-                    if v.get("version") and v.get("beta", False) == config_data.get("beta_updates", False): return v
+                    if v.get("version") and v.get("beta", False) == config_data.get("beta_updates", False) and v.get("debug", False) == config_data.get("debug_updates", False): return v
     except Exception as e: errorMessage(f"Error while trying to check for updates: {str(e)}")
 def get_latest_wireguard_version() -> dict:
     try:
@@ -455,7 +457,7 @@ def tkinter_install_updates(latest_ver: str):
         confirmed = messagebox.askyesno("Update Available!", f"NordWireConnect v{latest_ver} is now available to be downloaded from GitHub!\nDo you wish to proceed?", icon="info")
         if confirmed:
             installer_path = os.path.join(app_data_path, "NordWireConnectInstaller.exe")
-            download_progress = requests.download(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe", installer_path)
+            download_progress = requests.download(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/{'NordWireConnectDebugInstaller.exe' if config_data.get('debug_updates', False) else 'NordWireConnectInstaller.exe'}", installer_path)
             if download_progress.ok:
                 if config_data.get("auto_connect", True): 
                     session_data["connected"] = False
@@ -522,7 +524,7 @@ def check_for_updates():
             return
         if latest_version["version"] > version: 
             latest_ver = latest_version["version"]
-            test_available = requests.head(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe")
+            test_available = requests.head(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/{'NordWireConnectDebugInstaller.exe' if config_data.get('debug_updates', False) else 'NordWireConnectInstaller.exe'}")
             if not test_available.ok: 
                 errorMessage("I'm sorry! The latest version is currently unavailable to be downloaded. Please check back later!")
                 return
@@ -614,7 +616,8 @@ def refresh_plan_info():
             mainMessage("Fetching Plan Renewal Information..")
             plan_renewal_info = get_vpn_renewal_data()
             config_data["plan_renewal_data"] = {"expiry": plan_renewal_info.get("raw_expiry"), "active": plan_renewal_info.get("active")}
-            plan_reminded = False
+        else: config_data["plan_renewal_data"] = {"expiry": "0000-00-00 00:00:00", "active": False}
+        plan_reminded = False
         if config_data.get("plan_renewal_data", {}).get("active") and config_data.get("plan_renewal_reminder") == True:
             cur_time = get_current_time()
             diff = convert_nordtime_to_datetime(config_data["plan_renewal_data"]["expiry"]) - cur_time
@@ -821,6 +824,11 @@ def change_beta_updates():
     save_configuration()
     update_tray()
 def check_beta_updates(): return config_data.get("beta_updates", False) == True
+def change_debug_updates():
+    config_data["debug_updates"] = not config_data.get("debug_updates", False)
+    save_configuration()
+    update_tray()
+def check_debug_updates(): return config_data.get("debug_updates", False) == True
 def change_reminder_level(level_index):
     config_data["plan_reminder_level"] = level_index
     save_configuration()
@@ -876,7 +884,7 @@ def differ_to_data_usage() -> str:
 def differ_to_dns() -> str: return f"DNS Servers: {config_data['dns']}"
 def differ_to_nord_acc() -> str: return f"Account: {config_data.get('username', 'N/A')} (Token {len(config_data['access_token']) > 60 and 'Given' or 'Ungiven'})"
 def differ_to_channel() -> str: return f"Connection Channel: {config_data.get('connection_channel', 'N/A')}"
-def differ_to_keepalive() -> str: return f"Persistent Keepalive: {config_data.get('persistent_keepalive', 25)}"
+def differ_to_keepalive() -> str: return f"Persistent Keepalive: {config_data.get('persistent_keepalive', 10)}"
 def differ_to_def_loc() -> str: 
     if config_data.get("default_location") and config_data["default_location"].lower() != "auto":
         _, server_loc = config_data["default_location"].split("_")
@@ -1168,7 +1176,7 @@ PostDown = echo Disconnected > "{os.path.join(app_data_path, 'ConnectionStatus')
 PublicKey = {wireguard_metadata[0].get("value")}
 Endpoint = {s.get('station')}:51820
 AllowedIPs = {get_allowed_ips()}
-PersistentKeepalive = {config_data.get('persistent_keepalive', 25)}"""
+PersistentKeepalive = {config_data.get('persistent_keepalive', 10)}"""
             if not server_check(server=s.get('station')): continue
             config_path = os.path.join(app_data_path, f"{shortened_name}.{city_name}.conf")
             with open(config_path, "w") as f: f.write(configuration)
@@ -1279,12 +1287,12 @@ def handle_stat_thread():
                         session_data["download_data_usage"] = data_usage[0]
                         session_data["upload_data_usage"] = data_usage[1]
                 session_data["session_time"] = since_connected
-                pystray_icon.title = f"NordWireConnect\nConnected to {session_data['server']['name']}!\nCity: {session_data['server']['locations'][0]['country']['city']['name']}"
+                pystray_icon.title = f"NordWireConnect v{version}\nConnected to {session_data['server']['name']}!\nCity: {session_data['server']['locations'][0]['country']['city']['name']}\nSession Time: {format_seconds(session_data['session_time'])}\nData Usage: {session_data.get('download_data_usage', 'N/A')} ⬇️, {session_data.get('upload_data_usage', 'N/A')} ⬆️\nLoad: {session_data.get('current_load', 'N/A')}%"
                 update_tray()
             else:
                 count = 0
                 since_connected = 0
-                pystray_icon.title = "NordWireConnect"
+                pystray_icon.title = f"NordWireConnect v{version}"
         except Exception: pass
 def handle_plan_renewal_thread():
     while True:
@@ -1471,6 +1479,7 @@ def app():
                         pystray.MenuItem("Optimize Server List", unicon(change_server_list), checked=unicon(check_server_list), radio=True),
                         pystray.MenuItem("Auto Check for Updates", unicon(change_autoupdates), checked=unicon(check_autoupdates), radio=True),
                         pystray.MenuItem("Beta Updates", unicon(change_beta_updates), checked=unicon(check_beta_updates), radio=True),
+                        pystray.MenuItem("Debugging Updates", unicon(change_debug_updates), checked=unicon(check_debug_updates), radio=True),
                     )),
                     pystray.MenuItem("Tools", pystray.Menu(
                         pystray.MenuItem("Set Shortcuts", create_mini_func(unicon(setup_shortcuts, [True]))),
