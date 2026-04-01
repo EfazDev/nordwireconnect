@@ -113,7 +113,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1l"
+version = "1.3.1m"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -412,7 +412,7 @@ def worker():
         try: func(*args)
         except Exception as e: errorMessage(f"Error while running worker ({getattr(func, "__name__")}): {str(e)}")
         finally: work_queue.task_done()
-def get_latest_version() -> dict:
+def get_latest_version() -> typing.Union[dict, None]:
     try:
         if tunnel_check(timeout=1):
             latest_version = requests.get("https://raw.githubusercontent.com/EfazDev/nordwireconnect/refs/heads/main/Version.json")
@@ -1368,7 +1368,10 @@ def app():
     os.makedirs(app_data_path, exist_ok=True)
 
     # Check Debugging Mode
-    try: debug_mode = os.path.exists(os.path.join(os.path.dirname(__file__), "debug_flag"))
+    try: 
+        debug_mode = os.path.exists(os.path.join(os.path.dirname(__file__), "debug_flag"))
+        if debug_mode:
+            with open(os.path.join(os.path.dirname(__file__), "debug_flag"), "r") as f: debug_mode = f.read().strip() == "true"
     except Exception: debug_mode = False
     if debug_mode: warnMessage("Debug Mode is enabled and console window should be visible if you can see this!")
 

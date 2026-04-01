@@ -13,7 +13,7 @@ a = Analysis(
     ['Main.py', 'Service.py'],
     pathex=[],
     binaries=[],
-    datas=collect_data_files("NordWireConnect") + collect_data_files("NordWireConnectService"),
+    datas=collect_data_files("NordWireConnect") + collect_data_files("NordWireConnectService") + [('debug_flag', '.')],
     hiddenimports=['PyKits', 'win32timezone', 'win32cred', 'pywintypes'],
     hookspath=[],
     hooksconfig={},
