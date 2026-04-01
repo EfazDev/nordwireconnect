@@ -113,7 +113,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1j"
+version = "1.3.1k"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -431,7 +431,6 @@ def get_latest_wireguard_version() -> dict:
                     v = res.get("windowsdl-win", {})
                     if v.get("uptodate") and v.get("version"): return v
     except Exception as e: errorMessage(f"Error while trying to check for updates: {str(e)}")
-@functools.lru_cache(maxsize=1)
 def get_current_wireguard_version() -> typing.Union[str, None]:
     for p in [
         r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
@@ -597,7 +596,6 @@ def clear_configuration_except_account():
             load_configuration()
             update_tray()
     except Exception as e: errorMessage(f"Unable to clear configuration data: {str(e)}")
-@functools.lru_cache(maxsize=3)
 def get_current_time() -> datetime.datetime: return datetime.datetime.now(tz=datetime.timezone.utc)
 def get_vpn_renewal_data() -> dict:
     try:
@@ -616,7 +614,6 @@ def get_vpn_renewal_data() -> dict:
                             }
     except Exception as e: errorMessage(f"Unable to get VPN plan renewal data: {str(e)}")
     return {"active": False, "expires_at": None, "raw_expiry": "0000-00-00 00:00:00"}
-@functools.lru_cache(maxsize=3)
 def get_if_within_reminder_period(expiry) -> typing.Union[int, None]:
     cur_time = get_current_time()
     diff = convert_nordtime_to_datetime(expiry) - cur_time
@@ -705,7 +702,7 @@ def send_command(cmd: str) -> str:
     _, data = win32file.ReadFile(handle, 4096) 
     win32file.CloseHandle(handle) 
     return data.decode("utf-8")
-@functools.lru_cache(maxsize=1)
+@functools.lru_cache(maxsize=5)
 def format_seconds(seconds: int) -> str:
     seconds = int(seconds)
     days, remaining_seconds = divmod(seconds, 86400)
@@ -940,7 +937,6 @@ def differ_to_renewal_remaining() -> str:
     else: return "Plan Renewal Remaining: N/A"
 
 # Connections
-@functools.lru_cache(maxsize=1)
 def calculate_allowed_ips(include_ranges: list[str], exclude_ranges: list[str]) -> list[str]:
     inc = [ipaddress.ip_network(n) for n in include_ranges]
     ex = [ipaddress.ip_network(n) for n in exclude_ranges]
