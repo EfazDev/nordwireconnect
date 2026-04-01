@@ -1,6 +1,7 @@
 @echo off
 
 rem Build & Sign NordWireConnect
+echo true > debug_flag
 pyinstaller ^
     --clean ^
     --distpath Installer ^

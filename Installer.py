@@ -29,7 +29,7 @@ pre_program_files = os.getenv("ProgramFiles")
 app_data_path = os.path.join(pip_class.getLocalAppData(), "NordWireConnect")
 program_files = os.path.join(pre_program_files, "NordWireConnect")
 cur_path = os.path.dirname(os.path.abspath(__file__))
-version = "1.3.1i"
+version = "1.3.1j"
 
 # Logging and Messages
 def systemMessage(message: str): colors_class.print(message, colors_class.hex_to_ansi2("#3E5FFF"))
@@ -82,6 +82,7 @@ def install():
             mainMessage("Please relaunch this program as Admin to continue installation!")
             relaunch_as_admin()
             return
+        
         # Unzip Install Files
         mainMessage("Exporting Installation Files..")
         zip_file = os.path.join(os.path.dirname(__file__), "NordWireConnect.zip")

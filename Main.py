@@ -26,6 +26,7 @@ import ipaddress
 import pythoncom # type: ignore
 import win32file # type: ignore
 import win32pipe # type: ignore
+import functools
 import webbrowser
 import subprocess
 import win32event # type: ignore
@@ -49,6 +50,7 @@ wireguard_location = os.path.join(pre_program_files, "WireGuard")
 program_files = os.path.join(pre_program_files, "NordWireConnect")
 private_key = None
 plan_reminded = False
+debug_mode = False
 base_config = {
     "access_token": "",
     "username": "",
@@ -111,7 +113,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1i"
+version = "1.3.1j"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -429,6 +431,7 @@ def get_latest_wireguard_version() -> dict:
                     v = res.get("windowsdl-win", {})
                     if v.get("uptodate") and v.get("version"): return v
     except Exception as e: errorMessage(f"Error while trying to check for updates: {str(e)}")
+@functools.lru_cache(maxsize=1)
 def get_current_wireguard_version() -> typing.Union[str, None]:
     for p in [
         r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
@@ -448,6 +451,9 @@ def get_current_wireguard_version() -> typing.Union[str, None]:
         except Exception: continue
     return None
 def auto_check_for_updates():
+    if session_data.get("connection_text", "").startswith("Connecting"):
+        while session_data.get("connection_text", "").startswith("Connecting"): time.sleep(0.1)
+    wait_until_connected()
     latest_version = get_latest_version()
     if latest_version and latest_version["version"] > version: 
         notification("Update Available!", f"NordWireConnect v{latest_version['version']} is now available for download!")
@@ -522,7 +528,7 @@ def check_for_updates():
         if not latest_version:
             errorMessage("Unable to check for new updates! Check your internet connection..")
             return
-        if latest_version["version"] > version: 
+        if latest_version["version"] > version and debug_mode == latest_version.get("debug", False): 
             latest_ver = latest_version["version"]
             test_available = requests.head(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/{'NordWireConnectDebugInstaller.exe' if config_data.get('debug_updates', False) else 'NordWireConnectInstaller.exe'}")
             if not test_available.ok: 
@@ -591,6 +597,7 @@ def clear_configuration_except_account():
             load_configuration()
             update_tray()
     except Exception as e: errorMessage(f"Unable to clear configuration data: {str(e)}")
+@functools.lru_cache(maxsize=3)
 def get_current_time() -> datetime.datetime: return datetime.datetime.now(tz=datetime.timezone.utc)
 def get_vpn_renewal_data() -> dict:
     try:
@@ -609,6 +616,18 @@ def get_vpn_renewal_data() -> dict:
                             }
     except Exception as e: errorMessage(f"Unable to get VPN plan renewal data: {str(e)}")
     return {"active": False, "expires_at": None, "raw_expiry": "0000-00-00 00:00:00"}
+@functools.lru_cache(maxsize=3)
+def get_if_within_reminder_period(expiry) -> typing.Union[int, None]:
+    cur_time = get_current_time()
+    diff = convert_nordtime_to_datetime(expiry) - cur_time
+    if diff.days <= 1 and config_data.get("plan_reminder_level", 5) == 6: return 6
+    elif diff.days <= 3 and config_data.get("plan_reminder_level", 5) == 5: return 5
+    elif diff.days <= 7 and config_data.get("plan_reminder_level", 5) == 4: return 4
+    elif diff.days <= 14 and config_data.get("plan_reminder_level", 5) == 3: return 3
+    elif diff.days <= 30 and config_data.get("plan_reminder_level", 5) == 2: return 2
+    elif diff.days <= 60 and config_data.get("plan_reminder_level", 5) == 1: return 1
+    elif diff.days <= 120 and config_data.get("plan_reminder_level", 5) == 0: return 0
+    else: return -1
 def refresh_plan_info():
     global plan_reminded
     try:
@@ -619,15 +638,19 @@ def refresh_plan_info():
         else: config_data["plan_renewal_data"] = {"expiry": "0000-00-00 00:00:00", "active": False}
         plan_reminded = False
         if config_data.get("plan_renewal_data", {}).get("active") and config_data.get("plan_renewal_reminder") == True:
-            cur_time = get_current_time()
-            diff = convert_nordtime_to_datetime(config_data["plan_renewal_data"]["expiry"]) - cur_time
-            if diff.days <= 1 and config_data.get("plan_reminder_level", 5) == 6: successMessageBox("Your NordVPN plan is expiring in less than a day!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
-            elif diff.days <= 3 and config_data.get("plan_reminder_level", 5) == 5: successMessageBox("Your NordVPN plan is expiring in less than 3 days!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
-            elif diff.days <= 7 and config_data.get("plan_reminder_level", 5) == 4: successMessageBox("Your NordVPN plan is expiring in less than a week!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
-            elif diff.days <= 14 and config_data.get("plan_reminder_level", 5) == 3: successMessageBox("Your NordVPN plan is expiring in less than 2 weeks!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
-            elif diff.days <= 30 and config_data.get("plan_reminder_level", 5) == 2: successMessageBox("Your NordVPN plan is expiring in less than 1 month!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
-            elif diff.days <= 60 and config_data.get("plan_reminder_level", 5) == 1: successMessageBox("Your NordVPN plan is expiring in less than 2 months!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
-            elif diff.days <= 120 and config_data.get("plan_reminder_level", 5) == 0: successMessageBox("Your NordVPN plan is expiring in less than 4 months!", "NordVPN Plan Expiry Reminder"); plan_reminded = True
+            res = get_if_within_reminder_period(config_data["plan_renewal_data"]["expiry"])
+            selector = {
+                6: "a day",
+                5: "3 days",
+                4: "a week", 
+                3: "2 weeks",
+                2: "a month",
+                1: "2 months",
+                0: "4 months"
+            }
+            if res != -1: 
+                successMessageBox(f"Your NordVPN plan is expiring in less than {selector[res]}!", "NordVPN Plan Expiry Reminder")
+                plan_reminded = True
             else: plan_reminded = False
         save_configuration()
     except Exception as e: errorMessage(f"Unable to load plan information. Exception: {str(e)}")
@@ -635,6 +658,7 @@ def refresh_plan_info():
 # Data Handling
 def session_data_modified():
     with open(os.path.join(app_data_path, "NordSessionData.json"), "w") as f: json.dump(session_data, f, indent=4)
+@functools.lru_cache(maxsize=3)
 def convert_nordtime_to_datetime(time_str: str) -> datetime.datetime: return datetime.datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
 def run_cache():
     mainMessage("Updating NordVPN server cache..")
@@ -681,6 +705,7 @@ def send_command(cmd: str) -> str:
     _, data = win32file.ReadFile(handle, 4096) 
     win32file.CloseHandle(handle) 
     return data.decode("utf-8")
+@functools.lru_cache(maxsize=1)
 def format_seconds(seconds: int) -> str:
     seconds = int(seconds)
     days, remaining_seconds = divmod(seconds, 86400)
@@ -915,6 +940,7 @@ def differ_to_renewal_remaining() -> str:
     else: return "Plan Renewal Remaining: N/A"
 
 # Connections
+@functools.lru_cache(maxsize=1)
 def calculate_allowed_ips(include_ranges: list[str], exclude_ranges: list[str]) -> list[str]:
     inc = [ipaddress.ip_network(n) for n in include_ranges]
     ex = [ipaddress.ip_network(n) for n in exclude_ranges]
@@ -946,6 +972,7 @@ def get_allowed_ips() -> str:
         if gateway_info and "," in gateway_info: filtering_list = [ip.strip() for ip in gateway_info.split(",") if requests.get_if_ip(ip.strip())]
         allowed = calculate_allowed_ips(["0.0.0.0/0", "::/0"], filtering_list)
     return ", ".join(allowed)
+@functools.lru_cache(maxsize=100)
 def convert_to_channel(hostname: str) -> int: return ((zlib.crc32(hostname.encode("utf-8")) & 0xffffffff) % 10) + 1
 def connect_server(server_name: str, exact_mode: str=None):
     config_data["server"] = server_name
@@ -1295,11 +1322,20 @@ def handle_stat_thread():
                 pystray_icon.title = f"NordWireConnect v{version}"
         except Exception: pass
 def handle_plan_renewal_thread():
+    global plan_reminded
+    t = 0
     while True:
-        time.sleep(60)
-        try: 
-            if config_data.get("plan_renewal_reminder", True) == True and config_data.get("plan_renewal_data", {}).get("active") == True and plan_reminded == False: refresh_plan_info()
-        except Exception: pass
+        t += 1
+        if t % 300 == 0:
+            try: 
+                if config_data.get("plan_renewal_reminder", True) == True and config_data.get("plan_renewal_data", {}).get("active") == True and plan_reminded == False: refresh_plan_info()
+            except Exception: pass
+        if config_data.get("plan_renewal_reminder", True) == True and config_data.get("plan_renewal_data", {}).get("active") == True and plan_reminded == False and config_data.get("plan_renewal_data", {}).get("expiry"):
+            try:
+                res = get_if_within_reminder_period(config_data["plan_renewal_data"]["expiry"])
+                if res != -1: refresh_plan_info()
+            except Exception: pass
+        time.sleep(1)
 def tunnel_check(timeout: int=5): return requests.get_if_connected(server="1.1.1.1", timeout=timeout)
 def server_check(server: str="1.1.1.1", timeout: int=5): 
     c = 0
@@ -1317,6 +1353,7 @@ def app():
     global pystray_icon
     global private_key
     global session_data
+    global debug_mode
     global tk_root
     colors_class.fix_windows_ansi()
     setup_logging()
@@ -1333,6 +1370,11 @@ def app():
     # Ensure App Data Path
     mainMessage("Ensuring App Data Paths..")
     os.makedirs(app_data_path, exist_ok=True)
+
+    # Check Debugging Mode
+    try: debug_mode = os.path.exists(os.path.join(os.path.dirname(__file__), "debug_flag"))
+    except Exception: debug_mode = False
+    if debug_mode: warnMessage("Debug Mode is enabled and console window should be visible if you can see this!")
 
     # Only for Windows
     if main_os != "Windows":
