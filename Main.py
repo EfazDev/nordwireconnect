@@ -113,7 +113,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1k"
+version = "1.3.1l"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -527,7 +527,7 @@ def check_for_updates():
         if not latest_version:
             errorMessage("Unable to check for new updates! Check your internet connection..")
             return
-        if latest_version["version"] > version and debug_mode == latest_version.get("debug", False): 
+        if latest_version["version"] > version or debug_mode != latest_version.get("debug", False): 
             latest_ver = latest_version["version"]
             test_available = requests.head(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/{'NordWireConnectDebugInstaller.exe' if config_data.get('debug_updates', False) else 'NordWireConnectInstaller.exe'}")
             if not test_available.ok: 
@@ -1517,7 +1517,7 @@ def app():
                         pystray.MenuItem("Optimize Server List", unicon(change_server_list), checked=unicon(check_server_list), radio=True),
                         pystray.MenuItem("Auto Check for Updates", unicon(change_autoupdates), checked=unicon(check_autoupdates), radio=True),
                         pystray.MenuItem("Beta Updates", unicon(change_beta_updates), checked=unicon(check_beta_updates), radio=True),
-                        pystray.MenuItem("Debugging Updates", unicon(change_debug_updates), checked=unicon(check_debug_updates), radio=True),
+                        pystray.MenuItem("Debug Mode", unicon(change_debug_updates), checked=unicon(check_debug_updates), radio=True),
                     )),
                     pystray.MenuItem("Tools", pystray.Menu(
                         pystray.MenuItem("Set Shortcuts", create_mini_func(unicon(setup_shortcuts, [True]))),
