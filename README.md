@@ -24,6 +24,9 @@ NordWireConnect and Wireguard will require Administrator permissions before inst
 - Loss Connect Protection (Auto Reconnect if connection was lost by Wireguard)
 - Set Shortcuts (Creates Desktop Shortcuts)
 - Brute End Wireguard (As a last resort, if Wireguard breaks, you can force end the process.)
+- Plan Reminders (Reminds you before a certain amount of time that your NordVPN subscription is going to renew soon!)
+- Beta and Debugging Updates (Debug updates allow you to see app logs in a console window while Beta updates allow you to get testing updates)
+- Other Tweaks!
 
 ## Rebuilding
 The following command (package dependencies) and Python 3.12+ are needed to rebuild the NordWireConnect app: `pip install pywin32 Pillow pystray pyinstaller truststore`. After that all the packages are installed, run the Rebuild.bat file to build and create an exe file in a dist folder (will automatically create if not found).
