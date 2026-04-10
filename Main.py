@@ -113,7 +113,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.1"
+version = "1.3.2a"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -456,6 +456,14 @@ def auto_check_for_updates():
     latest_version = get_latest_version()
     if latest_version and latest_version["version"] > version: 
         notification("Update Available!", f"NordWireConnect v{latest_version['version']} is now available for download!")
+    def wireguard_update():
+        latest_wireguard_version = get_latest_wireguard_version()
+        current_wireguard_version = get_current_wireguard_version()
+        if not latest_wireguard_version: return
+        if not current_wireguard_version: return
+        if latest_wireguard_version["version"] > current_wireguard_version: 
+            notification("Wireguard Update Available!", f"Wireguard v{latest_wireguard_version['version']} is now available for download! It is suggested to update for security.")
+    wireguard_update()
 def tkinter_install_updates(latest_ver: str):
     try:
         mainMessage(f"Update v{latest_ver} is now available!")
