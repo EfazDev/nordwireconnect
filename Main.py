@@ -50,6 +50,7 @@ wireguard_location = os.path.join(pre_program_files, "WireGuard")
 program_files = os.path.join(pre_program_files, "NordWireConnect")
 private_key = None
 plan_reminded = False
+data_reminded = False
 debug_mode = False
 base_config = {
     "access_token": "",
@@ -66,11 +67,18 @@ base_config = {
     "optimize_server_list": False,
     "default_location": "auto",
     "load_swapping": False,
+    "load_swapping_threshold": 50,
     "split_lan_routing": False,
     "loss_connect_protection": True,
+    "track_servers": True,
+    "server_history": None,
     "plan_renewal_reminder": False,
     "plan_renewal_data": None,
     "plan_reminder_level": 5,
+    "monthly_data_usage": None,
+    "total_data_usage": None,
+    "data_usage_reminder": False,
+    "usage_reminder_level": 3,
     "connection_channel": None,
     "check_for_updates": True,
     "beta_updates": False,
@@ -92,11 +100,18 @@ config_data_type_allowed = {
     "optimize_server_list": bool,
     "default_location": typing.Union[str, None],
     "load_swapping": bool,
+    "load_swapping_threshold": int,
     "split_lan_routing": bool,
     "loss_connect_protection": bool,
+    "track_servers": bool,
+    "server_history": typing.Union[list, None],
     "plan_renewal_reminder": bool,
     "plan_renewal_data": typing.Union[dict, None],
     "plan_reminder_level": int,
+    "monthly_data_usage": typing.Union[dict, None],
+    "total_data_usage": typing.Union[dict, None],
+    "data_usage_reminder": bool,
+    "usage_reminder_level": int,
     "connection_channel": typing.Union[int, None],
     "check_for_updates": bool,
     "beta_updates": bool,
@@ -113,7 +128,7 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.2"
+version = "1.3.5a"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -216,35 +231,37 @@ def relaunch_as_admin():
         1
     )
     sys.exit(0)
-def select_server_list(message: str="Please select a server!") -> typing.Union[None, dict]:
+def select_server_list(message: str="Please select a server!", servers: list=None) -> typing.Union[None, dict]:
     if not os.path.exists(os.path.join(app_data_path, "NordServerCache.json")):
         return
     with open(os.path.join(app_data_path, "NordServerCache.json"), "r") as f: raw_servers = json.load(f)
-    server_dictionary = {
-        "Auto": [("Auto", "auto", None)]
-    }
-    for s in raw_servers:
-        if s["status"] != "online" or s["load"] == 0:
-            continue
-        virutal_location = get_if_virtual_location(s)
-        wireguard_metadata = None
-        for m in s.get("technologies", []):
-            if m.get("id") == 35:
-                wireguard_metadata = m.get("metadata", {})
-                break
-        if not wireguard_metadata:
-            continue
-        country_name = s["locations"][0]["country"]["name"]
-        city_name = s["locations"][0]["country"]["city"]["name"]
-        city_with_virtual_text = city_name + (" - Virtual" if virutal_location else "")
-        server_name = s["name"]
-        if country_name not in server_dictionary:
-            server_dictionary[country_name] = {
-                "Auto": [("Auto", country_name, "country")]
-            }
-        if city_with_virtual_text not in server_dictionary.get(country_name):
-            server_dictionary[country_name][city_with_virtual_text] = [("Auto", city_name, "city")]
-        server_dictionary[country_name][city_with_virtual_text].append((server_name, server_name.replace(" ", "").replace("#", ""), "server"))
+    if servers == None:
+        server_dictionary = {
+            "Auto": [("Auto", "auto", None)]
+        }
+        for s in raw_servers:
+            if s["status"] != "online" or s["load"] == 0:
+                continue
+            virutal_location = get_if_virtual_location(s)
+            wireguard_metadata = None
+            for m in s.get("technologies", []):
+                if m.get("id") == 35:
+                    wireguard_metadata = m.get("metadata", {})
+                    break
+            if not wireguard_metadata:
+                continue
+            country_name = s["locations"][0]["country"]["name"]
+            city_name = s["locations"][0]["country"]["city"]["name"]
+            city_with_virtual_text = city_name + (" - Virtual" if virutal_location else "")
+            server_name = s["name"]
+            if country_name not in server_dictionary:
+                server_dictionary[country_name] = {
+                    "Auto": [("Auto", country_name, "country")]
+                }
+            if city_with_virtual_text not in server_dictionary.get(country_name):
+                server_dictionary[country_name][city_with_virtual_text] = [("Auto", city_name, "city")]
+            server_dictionary[country_name][city_with_virtual_text].append((server_name, server_name.replace(" ", "").replace("#", ""), "server"))
+    else: server_dictionary = servers
     win = tk.Toplevel()
     win.title("Select NordVPN Server")
     win.geometry("320x120")
@@ -257,67 +274,74 @@ def select_server_list(message: str="Please select a server!") -> typing.Union[N
         "exact_mode": None
     }
     result = {"value": None}
-    message_var = tk.StringVar(value=message)
-    label = tk.Label(
-        win,
-        textvariable=message_var,
-        anchor="w",
-        padx=10,
-        pady=8
-    )
+    label = tk.Label(win, textvariable=tk.StringVar(value=message), anchor="w", padx=10, pady=8)
     label.pack(fill="x")
+    rs_f = tk.Frame(win, padx=10)
+    rs_f.pack(fill="x")
+    rows = []
+    def reflow(): win.update_idletasks(); win.geometry("")
+    def add_row(c):
+        frame = tk.Frame(rs_f)
+        frame.pack(fill="x", pady=2)
+        num_of_rows = len(rows)
+        btn = tk.Button(frame, text="Select Option", anchor="w", relief="groove", width=40, fg="gray")
+        btn.pack(side="left")
+        def_fg = btn.cget("fg")
+        def reset_btn(i: int=num_of_rows, children: list=c):
+            for row in rows[i:]: row["frame"].destroy()
+            del rows[i:]
+            if i > 0 and rows[i-1].get("committed"): selected.update(rows[i-1]["committed"])
+            else: selected.update({"title": None, "tunnel_id": None, "exact_mode": None})
+            add_row(children)
+        rst = tk.Button(frame, text="✕", width=2, relief="flat", fg="gray", command=reset_btn)
+        rst.pack(side="left", padx=(2, 0))
+        def pick_handler(node: dict, i: int=num_of_rows):
+            for row in rows[i+1:]: row["frame"].destroy()
+            del rows[i+1:]
+            rows[i]["btn"].config(text=node["label"], fg=def_fg, relief="sunken")
+            committed = {"title": node["label"], "tunnel_id": node["tunnel_id"], "exact_mode": node["exact_mode"]}
+            rows[i]["committed"] = committed
+            selected.update(committed)
+            if node["children"]: add_row(node["children"])
+            else: reflow()
+        def show_menu(b: tk.Button=btn, ch: list=c):
+            m = tk.Menu(win, tearoff=0)
+            for node in ch: m.add_command(label=node["label"], command=lambda n=node: pick_handler(n))
+            x = b.winfo_rootx()
+            y = b.winfo_rooty() + b.winfo_height()
+            m.tk_popup(x, y)
+        btn.config(command=show_menu)
+        rows.append({"frame": frame, "btn": btn, "committed": None})
+        reflow()
+    def format_items(data: typing.Union[list, dict], root: bool=True):
+        nodes = []
+        if type(data) is list:
+            for lbl, tid, em in data:
+                if lbl.lower() == "auto": continue
+                nodes.append({"label": lbl, "tunnel_id": tid, "exact_mode": em, "children": None})
+        elif type(data) is dict:
+            for key in sorted(data.keys(), key=lambda x: ("\0" if x.lower() == "auto" else x)):
+                val = data[key]
+                if key.lower() == "auto":
+                    if root:
+                        for label, tunnel, exact in val: nodes.append({"label": label, "tunnel_id": tunnel if tunnel else label, "exact_mode": exact, "children": None})
+                    continue
+                if type(val) is list: info = val[0]
+                elif type(val) is dict: info = val.get("Auto", [("Auto", key, "country")])[0]
+                chi = format_items(val, root=False)
+                nodes.append({"label": key, "tunnel_id": info[1], "exact_mode": info[2], "children": chi if chi else None})
+        return nodes
+    add_row(format_items(server_dictionary))
     btn_frame = tk.Frame(win)
     btn_frame.pack(side="bottom", pady=6)
-    dropdown_btn = tk.Button(win, text="Select server ▼", width=28)
-    dropdown_btn.pack(pady=6)
-    def on_select(title: str, tunnel_id: str, exact_mode: str):
-        selected["title"] = title
-        selected["tunnel_id"] = tunnel_id
-        selected["exact_mode"] = exact_mode
-        if title.lower() == "auto": dropdown_btn.config(text=tunnel_id)
-        else: dropdown_btn.config(text=title)
-    def build(parent_menu, data: typing.Union[dict, list, tuple]):
-        if isinstance(data, dict):
-            for title, value in sorted(data.items(), key=lambda x: ("\0" if x[0].lower() == "auto" else x[0])):
-                submenu = tk.Menu(parent_menu, tearoff=0)
-                parent_menu.add_cascade(label=title, menu=submenu)
-                build(submenu, value)
-        elif isinstance(data, list):
-            data.sort(key=lambda x: ("\0" if x[0].lower() == "auto" else x[0]))
-            for title, tunnel_id, exact_mode in data:
-                def b(title, tunnel_id, exact_mode):
-                    parent_menu.add_command(
-                        label=title,
-                        command=lambda t=title, tid=tunnel_id, em=exact_mode:
-                            on_select(t, tid, em)
-                    )
-                b(title, tunnel_id, exact_mode)
-        elif isinstance(data, tuple):
-            title, tunnel_id, exact_mode = data
-            def b(title, tunnel_id, exact_mode):
-                parent_menu.add_command(
-                    label=title,
-                    command=lambda t=title, tid=tunnel_id, em=exact_mode:
-                        on_select(t, tid, em)
-                )
-            b(title, tunnel_id, exact_mode)
-        else: raise TypeError(f"Unsupported menu data: {type(data)}")
-    menu = tk.Menu(win, tearoff=0)
-    build(menu, server_dictionary)
-    def show_menu():
-        x = dropdown_btn.winfo_rootx()
-        y = dropdown_btn.winfo_rooty() + dropdown_btn.winfo_height()
-        menu.tk_popup(x, y)
-    dropdown_btn.config(command=show_menu)
     def confirm():
-        if selected["tunnel_id"] is not None: result["value"] = selected
+        if selected["tunnel_id"] != None: result["value"] = dict(selected)
         win.destroy()
-    def cancel():
-        result["value"] = None
-        win.destroy()
+    def cancel(): win.destroy()
     tk.Button(btn_frame, text="Confirm", width=10, command=confirm).pack(side="left", padx=6)
-    tk.Button(btn_frame, text="Cancel", width=10, command=cancel).pack(side="right", padx=6)
+    tk.Button(btn_frame, text="Cancel",  width=10, command=cancel).pack(side="left", padx=6)
     win.protocol("WM_DELETE_WINDOW", cancel)
+    reflow()
     win.grab_set()
     win.wait_window()
     return result["value"]
@@ -327,10 +351,28 @@ def connect_selected_server_button():
         return
     addToThread(connect_server, (selected_server["tunnel_id"], selected_server["exact_mode"]), connection=True)
     update_tray()
+def connect_history_server_button():
+    generated_servers = {}
+    if not config_data.get("server_history"): config_data["server_history"] = []
+    for s in config_data.get("server_history", []):
+        country = s.get("country")
+        city = s.get("city")
+        server_name = s.get("name")
+        date = s.get("time")
+        dt = datetime.datetime.fromtimestamp(date).astimezone()
+        if not country or not city or not server_name: continue
+        day = convert_to_local(dt).strftime("%Y-%m-%d")
+        time = convert_to_local(dt).strftime("%H:%M")
+        if day not in generated_servers: generated_servers[day] = {}
+        if time not in generated_servers[day]: generated_servers[day][time] = []
+        generated_servers[day][time].insert(0, (f"{server_name} ({city}, {country})", server_name.replace(" ", "").replace("#", ""), "server"))
+    selected_server = select_server_list("Please select a server from history to connect to!", servers=generated_servers)
+    if not selected_server: return
+    addToThread(connect_server, (selected_server["tunnel_id"], selected_server["exact_mode"]), connection=True)
+    update_tray()
 def save_auto_selected_server_button():
     selected_server = select_server_list("Please select a server to save as a default location!")
-    if not selected_server:
-        return
+    if not selected_server: return
     default_location(selected_server["tunnel_id"], selected_server["exact_mode"])
     update_tray()
 def setup_shortcuts(button: bool=False):
@@ -353,6 +395,16 @@ def setup_shortcuts(button: bool=False):
             if button == True: successMessageBox(f"Successfully set up shortcuts for NordWireConnect!", "NordWireConnect")
         finally: pythoncom.CoUninitialize()
     except Exception as e: errorMessage(f"Unable to save shortcuts: {str(e)}")
+def tkinter_clear_servers_history():
+    try:
+        confirmed = messagebox.askyesno("Clear Server Connected History", "Are you sure you want to clear the server connected history? This cannot be undone.")
+        if confirmed:
+            config_data["server_history"] = None
+            save_configuration()
+            update_tray()
+            successMessageBox("Successfully cleared server connected history!", "NordWireConnect")
+    except Exception as e: errorMessage(f"Unable to clear server connected history: {str(e)}")
+def clear_server_connected_history(): tk_root.after(0, tkinter_clear_servers_history)
 def delete_shortcuts():
     try:
         desk_shortpath = os.path.join(os.environ["USERPROFILE"], "Desktop", f"NordWireConnect.lnk")
@@ -605,6 +657,7 @@ def clear_configuration_except_account():
             update_tray()
     except Exception as e: errorMessage(f"Unable to clear configuration data: {str(e)}")
 def get_current_time() -> datetime.datetime: return datetime.datetime.now(tz=datetime.timezone.utc)
+def convert_to_local(datetime: datetime.datetime) -> datetime.datetime: return datetime.astimezone()
 def get_vpn_renewal_data() -> dict:
     try:
         if tunnel_check(timeout=1):
@@ -633,6 +686,45 @@ def get_if_within_reminder_period(expiry) -> typing.Union[int, None]:
     elif diff.days <= 60 and config_data.get("plan_reminder_level", 5) == 1: return 1
     elif diff.days <= 120 and config_data.get("plan_reminder_level", 5) == 0: return 0
     else: return -1
+def get_if_within_data_usage() -> typing.Union[int, None]:
+    if config_data.get("monthly_data_usage"):
+        cur_date = get_current_time()
+        usage = config_data["monthly_data_usage"]
+        total = usage['download'] + usage['upload']
+        if usage["month"] != cur_date.month or usage["year"] != cur_date.year: total = 0
+        if total >= 1_000_000_000 and config_data.get("usage_reminder_level", 3) == 8: return 8
+        elif total >= 5_000_000_000 and config_data.get("usage_reminder_level", 3) == 7: return 7
+        elif total >= 10_000_000_000 and config_data.get("usage_reminder_level", 3) == 6: return 6
+        elif total >= 50_000_000_000 and config_data.get("usage_reminder_level", 3) == 5: return 5
+        elif total >= 100_000_000_000 and config_data.get("usage_reminder_level", 3) == 4: return 4
+        elif total >= 250_000_000_000 and config_data.get("usage_reminder_level", 3) == 3: return 3
+        elif total >= 500_000_000_000 and config_data.get("usage_reminder_level", 3) == 2: return 2
+        elif total >= 1_024_000_000_000 and config_data.get("usage_reminder_level", 3) == 1: return 1
+        elif total >= 2_048_000_000_000 and config_data.get("usage_reminder_level", 3) == 0: return 0
+        else: return -1
+    else: return -1 
+def refresh_data_usage():
+    global data_reminded
+    try:
+        data_reminded = False
+        if config_data.get("monthly_data_usage", {}) and config_data.get("data_usage_reminder") == True:
+            res = get_if_within_data_usage()
+            selector = {
+                8: "1 GB",
+                7: "5 GB",
+                6: "10 GB",
+                5: "50 GB",
+                4: "100 GB", 
+                3: "250 GB",
+                2: "500 GB",
+                1: "1 TB",
+                0: "2 TB"
+            }
+            if res != -1: 
+                successMessageBox(f"Your data usage has exceeded the limit of {selector[res]}!", "NordVPN Data Usage Reminder")
+                data_reminded = True
+            else: data_reminded = False
+    except Exception as e: errorMessage(f"Unable to load data usage information. Exception: {str(e)}")
 def refresh_plan_info():
     global plan_reminded
     try:
@@ -717,6 +809,18 @@ def format_seconds(seconds: int) -> str:
     hours, remaining_seconds = divmod(remaining_seconds, 3600)
     minutes, seconds = divmod(remaining_seconds, 60)
     return f"{days:02d}:{hours:02d}:{minutes:02d}:{seconds:02d}"
+@functools.lru_cache(maxsize=5)
+def format_wireguard_bytes(n: int) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB", "PiB"):
+        if abs(n) < 1024:
+            return f"{n:.2f} {unit}"
+        n /= 1024
+    return f"{n:.2f} PiB"
+@functools.lru_cache(maxsize=5)
+def parse_wireguard_bytes(s: str) -> int:
+    units = {"B": 0, "KiB": 1, "MiB": 2, "GiB": 3, "TiB": 4, "PiB": 5}
+    value, unit = s.split()
+    return int(float(value) * (1024 ** units[unit]))
 def get_if_virtual_location(server: dict) -> bool:
     for sp in server.get("specifications", []):
         if sp["identifier"] == "virtual_location":
@@ -782,9 +886,43 @@ def change_keepalive():
             update_tray()
         else: errorMessage("The given channel number is not in range from 1 to 999.")
     except Exception as e: errorMessage("The given channel number is invalid.")
+def change_load_swap_threshold():
+    inputted = simpledialog.askinteger(title="Load Swapping Threshold Input", prompt="Enter the load percentage threshold for swapping servers (0-100):", initialvalue=50, minvalue=0, maxvalue=100)
+    try:
+        if inputted >= 0 and inputted <= 100:
+            config_data["load_swap_threshold"] = inputted
+            successMessageBox(f"Successfully changed Load Swapping Threshold to {inputted}%!", "NordWireConnect")
+            save_configuration()
+            update_tray()
+        else: errorMessage("The given load percentage is not in range from 0 to 100.")
+    except Exception as e: errorMessage("The given load percentage is invalid.")
 def open_nord_dashboard():
     try: webbrowser.open("https://my.nordaccount.com/dashboard/nordvpn/")
     except Exception as e: errorMessage(f"Unable to open NordVPN Dashboard: {str(e)}")
+def add_server_to_history(info: dict):
+    if not config_data.get("server_history"): config_data["server_history"] = []
+    if not check_track_servers(): return
+    history = config_data["server_history"]
+    history.insert(0, info)
+    if len(history) > 25: history = history[:25]
+    config_data["server_history"] = history
+    save_configuration()
+def add_data_usage_to_history(download: int, upload: int):
+    if download < 0 or upload < 0: return
+    cur_date = get_current_time()
+    if not config_data.get("monthly_data_usage"): config_data["monthly_data_usage"] = {"month": cur_date.month, "year": cur_date.year, "upload": 0, "download": 0}
+    if not config_data.get("total_data_usage"): config_data["total_data_usage"] = {"upload": 0, "download": 0}
+    usage = config_data["monthly_data_usage"]
+    total_usage = config_data["total_data_usage"]
+    if usage["month"] != cur_date.month or usage["year"] != cur_date.year: config_data["monthly_data_usage"] = {"month": cur_date.month, "year": cur_date.year, "upload": 0, "download": 0}
+    usage["upload"] += upload
+    usage["download"] += download
+    config_data["monthly_data_usage"] = usage
+    total_usage["upload"] += upload
+    total_usage["download"] += download
+    config_data["total_data_usage"] = total_usage
+    if data_reminded == False: refresh_data_usage()
+    save_configuration()
 def default_location(server_name: str, exact_mode: str=None): 
     if exact_mode: config_data["default_location"] = f"{exact_mode}_{server_name}"
     else: config_data["default_location"] = server_name
@@ -849,6 +987,11 @@ def change_plan_renewal_reminder():
     save_configuration()
     update_tray()
 def check_plan_renewal_reminder(): return config_data.get("plan_renewal_reminder", True) == True
+def change_data_usage_reminder():
+    config_data["data_usage_reminder"] = not config_data.get("data_usage_reminder", False)
+    save_configuration()
+    update_tray()
+def check_data_usage_reminder(): return config_data.get("data_usage_reminder", False) == True
 def change_beta_updates():
     config_data["beta_updates"] = not config_data.get("beta_updates", False)
     save_configuration()
@@ -859,11 +1002,21 @@ def change_debug_updates():
     save_configuration()
     update_tray()
 def check_debug_updates(): return config_data.get("debug_updates", False) == True
+def change_track_servers():
+    config_data["track_servers"] = not config_data.get("track_servers", False)
+    save_configuration()
+    update_tray()
+def check_track_servers(): return config_data.get("track_servers", False) == True
 def change_reminder_level(level_index):
     config_data["plan_reminder_level"] = level_index
     save_configuration()
     update_tray()
 def check_reminder_level(level_index): return config_data.get("plan_reminder_level", 5) == level_index
+def change_usage_level(level_index):
+    config_data["usage_reminder_level"] = level_index
+    save_configuration()
+    update_tray()
+def check_usage_level(level_index): return config_data.get("usage_reminder_level", 3) == level_index
 
 # Differenting Status
 def differ_from_status_text() -> str:
@@ -911,6 +1064,18 @@ def differ_to_session_time() -> str:
 def differ_to_data_usage() -> str: 
     if session_data["connected"] == True: return f"Data Usage: {session_data.get('download_data_usage', 'N/A')} ⬇️, {session_data.get('upload_data_usage', 'N/A')} ⬆️"
     else: return "Data Usage: N/A"
+def differ_to_monthly_data_usage() -> str:
+    if config_data.get("monthly_data_usage"):
+        cur_date = get_current_time()
+        usage = config_data["monthly_data_usage"]
+        if usage["month"] != cur_date.month or usage["year"] != cur_date.year: return "Monthly Data Usage: N/A"
+        return f"Monthly Data Usage: {format_wireguard_bytes(usage['download'])} ⬇️, {format_wireguard_bytes(usage['upload'])} ⬆️"
+    else: return "Monthly Data Usage: N/A"
+def differ_to_total_data_usage() -> str:
+    if config_data.get("total_data_usage"):
+        usage = config_data["total_data_usage"]
+        return f"Total Data Usage: {format_wireguard_bytes(usage['download'])} ⬇️, {format_wireguard_bytes(usage['upload'])} ⬆️"
+    else: return "Total Data Usage: N/A"
 def differ_to_dns() -> str: return f"DNS Servers: {config_data['dns']}"
 def differ_to_nord_acc() -> str: return f"Account: {config_data.get('username', 'N/A')} (Token {len(config_data['access_token']) > 60 and 'Given' or 'Ungiven'})"
 def differ_to_channel() -> str: return f"Connection Channel: {config_data.get('connection_channel', 'N/A')}"
@@ -920,6 +1085,7 @@ def differ_to_def_loc() -> str:
         _, server_loc = config_data["default_location"].split("_")
         return f"Default Location: {server_loc}"
     else: return "Default Location: Auto"
+def differ_to_load_swap_usage() -> str: return f"Load Swapping Threshold: {config_data.get('load_swapping_threshold', 50)}%"
 def differ_to_renewal_active() -> str:
     if config_data.get("plan_renewal_data", {}).get("active"): return "Plan Active: True"
     else: return "Plan Active: False"
@@ -1243,6 +1409,12 @@ PersistentKeepalive = {config_data.get('persistent_keepalive', 10)}"""
             session_data["exact_connect"] = exact_mode
             session_data["org_server_id"] = config_data["server"]
             session_data_modified()
+            add_server_to_history({
+                "city": connected_server['locations'][0]['country']['city']['name'],
+                "country": connected_server['locations'][0]['country']['name'],
+                "time": get_current_time().timestamp(),
+                "name": connected_server['name'],
+            })
             successMessageBox(f"Successfully connected to server: {connected_server['name']}!", "Yay!")
             set_icon("connected.ico")
             needing_state()
@@ -1310,11 +1482,12 @@ def handle_stat_thread():
                             found_server = s
                             break
                     session_data["current_load"] = found_server["load"] if found_server else session_data["current_load"]
-                    if check_load_swapping() and session_data["current_load"] > 50:
+                    if check_load_swapping() and session_data["current_load"] > config_data.get("load_swapping_threshold", 50):
                         mainMessage("Reconnecting due to load > 50%..")
                         differ_from_status_action2()
                     data_usage = send_command("data-usage").split(",")
                     if len(data_usage) == 2:
+                        add_data_usage_to_history(parse_wireguard_bytes(data_usage[0])-parse_wireguard_bytes(session_data["download_data_usage"]), parse_wireguard_bytes(data_usage[1])-parse_wireguard_bytes(session_data["upload_data_usage"]))
                         session_data["download_data_usage"] = data_usage[0]
                         session_data["upload_data_usage"] = data_usage[1]
                 session_data["session_time"] = since_connected
@@ -1488,6 +1661,7 @@ def app():
                 pystray.MenuItem(unicon(differ_from_status_text), create_mini_func(differ_from_status_action, connected=True)),
                 pystray.MenuItem("Reconnect Servers", create_mini_func(differ_from_status_action2, connected=True), visible=lambda icon: session_data["connected"] == True),
                 pystray.MenuItem("Servers", lambda icon, item: tk_root.after(0, connect_selected_server_button)),
+                pystray.MenuItem("History", lambda icon, item: tk_root.after(0, connect_history_server_button)),
                 pystray.MenuItem("Configuration", pystray.Menu(
                     pystray.MenuItem("Connection", pystray.Menu(
                         pystray.MenuItem(unicon(differ_to_dns), lambda icon, item: None, enabled=False),
@@ -1502,6 +1676,7 @@ def app():
                         pystray.MenuItem(unicon(differ_to_def_loc), lambda icon, item: tk_root.after(0, save_auto_selected_server_button)),
                         pystray.Menu.SEPARATOR,
                         pystray.MenuItem("Load Swapping", unicon(change_load_swapping), checked=unicon(check_load_swapping), radio=True),
+                        pystray.MenuItem(unicon(differ_to_load_swap_usage), lambda icon, item: tk_root.after(0, change_load_swap_threshold), visible=unicon(check_load_swapping)),
                         pystray.MenuItem("Auto Reconnect", unicon(change_auto_connect), checked=unicon(check_auto_connect), radio=True),
                         pystray.MenuItem("Split Private LAN Routing", unicon(change_split_lan_routing), checked=unicon(check_split_lan_routing), radio=True),
                         pystray.MenuItem("Loss Connect Protection", unicon(change_loss_connect_protection), checked=unicon(check_loss_connect_protection), radio=True),
@@ -1523,15 +1698,33 @@ def app():
                         pystray.MenuItem("Refresh Plan Information", create_mini_func(refresh_plan_info)),
                         pystray.MenuItem("Open NordVPN Dashboard", unicon(open_nord_dashboard))
                     )),
+                    pystray.MenuItem("Data Usage", pystray.Menu(
+                        pystray.MenuItem(unicon(differ_to_monthly_data_usage), lambda icon, item: None, enabled=False, radio=True),
+                        pystray.MenuItem(unicon(differ_to_total_data_usage), lambda icon, item: None, enabled=False, radio=True),
+                        pystray.MenuItem("Data Usage Reminder (Monthly)", unicon(change_data_usage_reminder), checked=unicon(check_data_usage_reminder), radio=True),
+                        pystray.MenuItem("Usage Level", pystray.Menu(
+                            pystray.MenuItem("Level 8 (1 GB)", unicon(change_usage_level, [8]), checked=unicon(check_usage_level, [8]), radio=True),
+                            pystray.MenuItem("Level 7 (5 GB)", unicon(change_usage_level, [7]), checked=unicon(check_usage_level, [7]), radio=True),
+                            pystray.MenuItem("Level 6 (10 GB)", unicon(change_usage_level, [6]), checked=unicon(check_usage_level, [6]), radio=True),
+                            pystray.MenuItem("Level 5 (50 GB)", unicon(change_usage_level, [5]), checked=unicon(check_usage_level, [5]), radio=True),
+                            pystray.MenuItem("Level 4 (100 GB)", unicon(change_usage_level, [4]), checked=unicon(check_usage_level, [4]), radio=True),
+                            pystray.MenuItem("Level 3 (250 GB)", unicon(change_usage_level, [3]), checked=unicon(check_usage_level, [3]), radio=True),
+                            pystray.MenuItem("Level 2 (500 GB)", unicon(change_usage_level, [2]), checked=unicon(check_usage_level, [2]), radio=True),
+                            pystray.MenuItem("Level 1 (1 TB)", unicon(change_usage_level, [1]), checked=unicon(check_usage_level, [1]), radio=True),
+                            pystray.MenuItem("Level 0 (2 TB)", unicon(change_usage_level, [0]), checked=unicon(check_usage_level, [0]), radio=True),
+                        ))
+                    )),
                     pystray.MenuItem("App", pystray.Menu(
                         pystray.MenuItem("Notifications", unicon(change_notifications), checked=unicon(check_notifications), radio=True),
                         pystray.MenuItem("Optimize Server List", unicon(change_server_list), checked=unicon(check_server_list), radio=True),
                         pystray.MenuItem("Auto Check for Updates", unicon(change_autoupdates), checked=unicon(check_autoupdates), radio=True),
                         pystray.MenuItem("Beta Updates", unicon(change_beta_updates), checked=unicon(check_beta_updates), radio=True),
                         pystray.MenuItem("Debug Mode", unicon(change_debug_updates), checked=unicon(check_debug_updates), radio=True),
+                        pystray.MenuItem("Track Servers Connected", unicon(change_track_servers), checked=unicon(check_track_servers), radio=True),
                     )),
                     pystray.MenuItem("Tools", pystray.Menu(
                         pystray.MenuItem("Set Shortcuts", create_mini_func(unicon(setup_shortcuts, [True]))),
+                        pystray.MenuItem("Clear Server Connected History", create_mini_func(unicon(clear_server_connected_history))),
                         pystray.MenuItem("Brute End Wireguard", create_mini_func(brute_end_wireguard)),
                         pystray.MenuItem("Reset DNS Cache", lambda icon, item: unicon(reset_dns_cache)),
                         pystray.MenuItem("Reset Windows Networking", lambda icon, item: tk_root.after(0, reset_windows_networking)),
