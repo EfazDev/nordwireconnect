@@ -70,6 +70,7 @@ base_config = {
     "load_swapping_threshold": 50,
     "split_lan_routing": False,
     "loss_connect_protection": True,
+    "threat_protection_lite": False,
     "track_servers": True,
     "server_history": None,
     "plan_renewal_reminder": False,
@@ -103,6 +104,7 @@ config_data_type_allowed = {
     "load_swapping_threshold": int,
     "split_lan_routing": bool,
     "loss_connect_protection": bool,
+    "threat_protection_lite": bool,
     "track_servers": bool,
     "server_history": typing.Union[list, None],
     "plan_renewal_reminder": bool,
@@ -128,7 +130,8 @@ session_data = {
 full_files = False
 pystray_icon = None
 stop_app = False
-version = "1.3.5a"
+add_data_count = 0
+version = "1.3.5b"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -908,6 +911,7 @@ def add_server_to_history(info: dict):
     config_data["server_history"] = history
     save_configuration()
 def add_data_usage_to_history(download: int, upload: int):
+    global add_data_count
     if download < 0 or upload < 0: return
     cur_date = get_current_time()
     if not config_data.get("monthly_data_usage"): config_data["monthly_data_usage"] = {"month": cur_date.month, "year": cur_date.year, "upload": 0, "download": 0}
@@ -922,7 +926,8 @@ def add_data_usage_to_history(download: int, upload: int):
     total_usage["download"] += download
     config_data["total_data_usage"] = total_usage
     if data_reminded == False: refresh_data_usage()
-    save_configuration()
+    add_data_count += 1
+    if add_data_count % 10 == 0: save_configuration()
 def default_location(server_name: str, exact_mode: str=None): 
     if exact_mode: config_data["default_location"] = f"{exact_mode}_{server_name}"
     else: config_data["default_location"] = server_name
@@ -1017,6 +1022,11 @@ def change_usage_level(level_index):
     save_configuration()
     update_tray()
 def check_usage_level(level_index): return config_data.get("usage_reminder_level", 3) == level_index
+def check_threat_protection_lite(): return config_data.get("threat_protection_lite", False) == True
+def change_threat_protection_lite():
+    config_data["threat_protection_lite"] = not config_data.get("threat_protection_lite", False)
+    save_configuration()
+    update_tray()
 
 # Differenting Status
 def differ_from_status_text() -> str:
@@ -1076,7 +1086,9 @@ def differ_to_total_data_usage() -> str:
         usage = config_data["total_data_usage"]
         return f"Total Data Usage: {format_wireguard_bytes(usage['download'])} ⬇️, {format_wireguard_bytes(usage['upload'])} ⬆️"
     else: return "Total Data Usage: N/A"
-def differ_to_dns() -> str: return f"DNS Servers: {config_data['dns']}"
+def differ_to_dns() -> str: 
+    if check_threat_protection_lite(): return "DNS Servers: Threat Protection Lite"
+    return f"DNS Servers: {config_data['dns']}"
 def differ_to_nord_acc() -> str: return f"Account: {config_data.get('username', 'N/A')} (Token {len(config_data['access_token']) > 60 and 'Given' or 'Ungiven'})"
 def differ_to_channel() -> str: return f"Connection Channel: {config_data.get('connection_channel', 'N/A')}"
 def differ_to_keepalive() -> str: return f"Persistent Keepalive: {config_data.get('persistent_keepalive', 10)}"
@@ -1360,11 +1372,13 @@ def connect(exact_mode: str=None):
                     break
             if not wireguard_metadata: continue
             wait_until_connected()
+            dns = config_data.get("dns", "103.86.96.100, 103.86.99.100")
+            if check_threat_protection_lite(): dns = "103.86.99.99, 103.86.96.96"
             configuration = f"""# {shortened_name}.{city_name}.conf
 [Interface]
 PrivateKey = {private_key}
 ListenPort = 51820
-DNS = {config_data.get('dns')}
+DNS = {dns}
 Address = 10.5.0.2/16
 PostUp = echo Connected > "{os.path.join(app_data_path, 'ConnectionStatus')}"
 PostDown = echo Disconnected > "{os.path.join(app_data_path, 'ConnectionStatus')}"
@@ -1669,7 +1683,7 @@ def app():
                         pystray.MenuItem(unicon(differ_to_channel), lambda icon, item: None, enabled=False),
                         pystray.MenuItem(unicon(differ_to_keepalive), lambda icon, item: None, enabled=False),
                         pystray.Menu.SEPARATOR,
-                        pystray.MenuItem("Change DNS Servers", lambda icon, item: tk_root.after(0, change_dns)),
+                        pystray.MenuItem("Change DNS Servers", lambda icon, item: tk_root.after(0, change_dns), visible=not unicon(check_threat_protection_lite)),
                         pystray.MenuItem("Change Access Token", lambda icon, item: tk_root.after(0, change_access_token)),
                         pystray.MenuItem("Change Connection Channel", lambda icon, item: tk_root.after(0, change_connection_channel)),
                         pystray.MenuItem("Change Persistent Keepalive", lambda icon, item: tk_root.after(0, change_keepalive)),
@@ -1680,6 +1694,7 @@ def app():
                         pystray.MenuItem("Auto Reconnect", unicon(change_auto_connect), checked=unicon(check_auto_connect), radio=True),
                         pystray.MenuItem("Split Private LAN Routing", unicon(change_split_lan_routing), checked=unicon(check_split_lan_routing), radio=True),
                         pystray.MenuItem("Loss Connect Protection", unicon(change_loss_connect_protection), checked=unicon(check_loss_connect_protection), radio=True),
+                        pystray.MenuItem("Threat Protection Lite", unicon(change_threat_protection_lite), checked=unicon(check_threat_protection_lite), radio=True),
                     )),
                     pystray.MenuItem("Plan", pystray.Menu(
                         pystray.MenuItem(unicon(differ_to_renewal_active), lambda icon, item: None, enabled=False, radio=True),
