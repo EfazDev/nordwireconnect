@@ -131,7 +131,7 @@ full_files = False
 pystray_icon = None
 stop_app = False
 add_data_count = 0
-version = "1.3.5b"
+version = "1.3.5c"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -234,6 +234,11 @@ def relaunch_as_admin():
         1
     )
     sys.exit(0)
+def center_tkinter_window(window: tk.Toplevel):
+    window.update_idletasks() 
+    x = (window.winfo_screenwidth() // 2) - (window.winfo_width() // 2)
+    y = (window.winfo_screenheight() // 2) - (window.winfo_height() // 2)
+    window.geometry(f'+{x}+{y}')
 def select_server_list(message: str="Please select a server!", servers: list=None) -> typing.Union[None, dict]:
     if not os.path.exists(os.path.join(app_data_path, "NordServerCache.json")):
         return
@@ -270,6 +275,7 @@ def select_server_list(message: str="Please select a server!", servers: list=Non
     win.geometry("320x120")
     win.resizable(False, False)
     win.attributes("-topmost", True)
+    center_tkinter_window(win)
     win.iconphoto(False, tk.PhotoImage(file=os.path.join(program_files, "Resources", "app_icon.png")))
     selected = {
         "title": None,
