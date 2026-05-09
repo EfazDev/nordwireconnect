@@ -135,7 +135,7 @@ full_files = False
 pystray_icon = None
 stop_app = False
 add_data_count = 0
-version = "1.3.5d"
+version = "1.3.5e"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -653,6 +653,14 @@ def reset_windows_networking():
                 1
             )
     except Exception as e: errorMessage(f"Unable to reset Windows Networking: {str(e)}")
+def clear_wireguard_conf_files():
+    try:
+        confirmed = messagebox.askyesno("Clear Wireguard .conf Files", f"Are you sure you want to clear all Wireguard .conf files?", icon="question")
+        if confirmed:
+            mainMessage("Clearing Wireguard .conf files..")
+            for filename in os.listdir(app_data_path):
+                if filename.endswith(".conf"): os.remove(os.path.join(app_data_path, filename))
+    except Exception as e: errorMessage(f"Unable to clear Wireguard .conf files: {str(e)}")
 def clear_configuration():
     try:
         global config_data
@@ -1419,6 +1427,7 @@ PersistentKeepalive = {config_data.get('persistent_keepalive', 10)}"""
             if session_data["connection_text"] == "Not Connected" and session_data["connected"] == False: break
             add = send_command(f"reinstall-wire-tunnel {shortened_name}.{city_name} {config_path}")
             attempts += 1
+            if os.path.exists(config_path): os.remove(config_path)
             if add == "0":
                 mainMessage(f"Added new WireGuard configuration for server: {s['name']}")
                 tunnel_check(timeout=3)
@@ -1769,6 +1778,7 @@ def app():
                         pystray.MenuItem("Brute End Wireguard", create_mini_func(brute_end_wireguard)),
                         pystray.MenuItem("Reset DNS Cache", lambda icon, item: unicon(reset_dns_cache)),
                         pystray.MenuItem("Reset Windows Networking", lambda icon, item: tk_root.after(0, reset_windows_networking)),
+                        pystray.MenuItem("Clear Wireguard .conf Files", lambda icon, item: tk_root.after(0, clear_wireguard_conf_files)),
                         pystray.MenuItem("Clear Configuration", lambda icon, item: tk_root.after(0, clear_configuration)),
                         pystray.MenuItem("Clear Configuration (except Account)", lambda icon, item: tk_root.after(0, clear_configuration_except_account)),
                     )),
