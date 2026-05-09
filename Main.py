@@ -19,6 +19,7 @@ import pystray # type: ignore
 import logging
 import datetime
 import platform
+import binascii
 import win32api # type: ignore
 import win32con # type: ignore
 import threading
@@ -27,6 +28,7 @@ import pythoncom # type: ignore
 import win32file # type: ignore
 import win32pipe # type: ignore
 import functools
+import win32crypt  # type: ignore
 import webbrowser
 import subprocess
 import win32event # type: ignore
@@ -82,6 +84,7 @@ base_config = {
     "usage_reminder_level": 3,
     "connection_channel": None,
     "check_for_updates": True,
+    "data_encrypted": False,
     "beta_updates": False,
     "debug_updates": False
 }
@@ -115,6 +118,7 @@ config_data_type_allowed = {
     "data_usage_reminder": bool,
     "usage_reminder_level": int,
     "connection_channel": typing.Union[int, None],
+    "data_encrypted": bool,
     "check_for_updates": bool,
     "beta_updates": bool,
     "debug_updates": bool
@@ -131,7 +135,7 @@ full_files = False
 pystray_icon = None
 stop_app = False
 add_data_count = 0
-version = "1.3.5c"
+version = "1.3.5d"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -239,6 +243,15 @@ def center_tkinter_window(window: tk.Toplevel):
     x = (window.winfo_screenwidth() // 2) - (window.winfo_width() // 2)
     y = (window.winfo_screenheight() // 2) - (window.winfo_height() // 2)
     window.geometry(f'+{x}+{y}')
+def encrypt_data(data: str) -> str:
+    return binascii.hexlify(win32crypt.CryptProtectData(
+        data.encode("utf-16-le"), None, None, None, None, 0
+    )).decode()
+def decode_data(encrypted: str) -> str:
+    _, decrypted_password_string = win32crypt.CryptUnprotectData(
+        binascii.unhexlify(encrypted), None, None, None, 0
+    )
+    return decrypted_password_string.decode("utf-16-le")
 def select_server_list(message: str="Please select a server!", servers: list=None) -> typing.Union[None, dict]:
     if not os.path.exists(os.path.join(app_data_path, "NordServerCache.json")):
         return
@@ -671,7 +684,8 @@ def get_vpn_renewal_data() -> dict:
     try:
         if tunnel_check(timeout=1):
             if not config_data.get("access_token", ""): return {"active": False, "expires_at": None, "raw_expiry": "0000-00-00 00:00:00"}
-            service_data = requests.get(f"https://api.nordvpn.com/v1/users/services", auth=["token", config_data.get("access_token", "")])
+            decrypted_token = decode_data(config_data.get("access_token", ""))
+            service_data = requests.get(f"https://api.nordvpn.com/v1/users/services", auth=["token", decrypted_token])
             if service_data.ok:
                 for s in service_data.json:
                     if s.get("service", {}).get("identifier") == "vpn":
@@ -856,11 +870,11 @@ def change_access_token():
             if test_request2.ok:
                 test_request = test_request.json
                 test_request2 = test_request2.json
-                config_data["openvpn_username"] = test_request.get("username", "")
-                config_data["openvpn_password"] = test_request.get("password", "")
+                config_data["openvpn_username"] = encrypt_data(test_request.get("username", ""))
+                config_data["openvpn_password"] = encrypt_data(test_request.get("password", ""))
                 config_data["nordvpn_email"] = test_request2.get("email", "")
                 config_data["username"] = test_request2.get("username", "")
-                config_data["access_token"] = inputted
+                config_data["access_token"] = encrypt_data(inputted)
                 private_key = test_request.get("nordlynx_private_key", "")
                 successMessageBox(f"Successfully logged into {test_request2.get('email')}!", "NordWireConnect")
                 save_configuration()
@@ -951,6 +965,11 @@ def load_configuration():
         with open(os.path.join(app_data_path, "ConnectConfig.json"), "r") as f: temp_conf = json.load(f)
         for k, v in temp_conf.items():
             if isinstance(v, config_data_type_allowed.get(k)): config_data[k] = v
+        if config_data.get("data_encrypted") == False:
+            for k in ["access_token", "openvpn_username", "openvpn_password"]:
+                if type(config_data.get(k)) is str: config_data[k] = encrypt_data(config_data[k])
+            config_data["data_encrypted"] = True
+            save_configuration()
 def save_configuration():
     mainMessage("Saving configuration..")
     with open(os.path.join(app_data_path, "ConnectConfig.json"), "w") as f: json.dump(config_data, f, indent=4)
@@ -1635,7 +1654,8 @@ def app():
     if config_data.get("access_token"):
         mainMessage("Getting NordVPN credentials..")
         try:
-            credentials = requests.get(f"https://api.nordvpn.com/v1/users/services/credentials", auth=["token", config_data.get("access_token")])
+            decrypted_token = decode_data(config_data["access_token"])
+            credentials = requests.get(f"https://api.nordvpn.com/v1/users/services/credentials", auth=["token", decrypted_token])
             if not credentials.ok:
                 errorMessage("Unable to get NordVPN credentials. Is the access token valid?")
                 sys.exit(1)
