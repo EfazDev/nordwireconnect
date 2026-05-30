@@ -32,7 +32,7 @@ service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-version = "1.3.5f"
+version = "1.3.5g"
 colors_class = PyKits.Colors()
 pip_class = PyKits.pip()
 
@@ -224,6 +224,7 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                         if "transfer:" in l: return l.replace("transfer: ", "").replace(" received", "").replace(" sent", "").replace(", ", ",")
                 return "0,0"
             elif command.startswith("router-ip-info"):
+                if True: return "disabled,disabled"
                 route_out = shell_run("route print 0.0.0.0").stdout.replace("[SEPARATE]", "") + "\n[SEPARATE]\n" + shell_run("route print ::/0").stdout.replace("[SEPARATE]", "")
                 parsing_mode = None
                 active = False

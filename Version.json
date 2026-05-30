@@ -2,6 +2,16 @@
     "version": "1.3.2",
     "versions": [
         {
+            "version": "1.3.5g",
+            "beta": true,
+            "debug": false
+        },
+        {
+            "version": "1.3.5g",
+            "beta": true,
+            "debug": true
+        },
+        {
             "version": "1.3.5f",
             "beta": true,
             "debug": false
