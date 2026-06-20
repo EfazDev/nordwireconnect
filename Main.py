@@ -50,6 +50,7 @@ pre_program_files = os.getenv("ProgramFiles")
 app_data_path = os.path.join(pip_class.getLocalAppData(), "NordWireConnect")
 wireguard_location = os.path.join(pre_program_files, "WireGuard")
 program_files = os.path.join(pre_program_files, "NordWireConnect")
+one_instance_lock = None
 private_key = None
 plan_reminded = False
 data_reminded = False
@@ -135,7 +136,7 @@ full_files = False
 pystray_icon = None
 stop_app = False
 add_data_count = 0
-version = "1.3.5g"
+version = "1.3.5h"
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
@@ -476,6 +477,7 @@ def check_stop_flag():
     if stop_app:
         mainMessage("Exiting app..")
         send_command("ui-closing")
+        if one_instance_lock and one_instance_lock.exists(): one_instance_lock.release()
         tk_root.quit()
         sys.exit(0)
         return
@@ -1059,6 +1061,7 @@ def check_threat_protection_lite(): return config_data.get("threat_protection_li
 def change_threat_protection_lite():
     config_data["threat_protection_lite"] = not config_data.get("threat_protection_lite", False)
     save_configuration()
+    if session_data["connected"] == True: differ_from_status_action2()
     update_tray()
 
 # Differenting Status
@@ -1574,6 +1577,7 @@ def wait_until_connected():
 
 # Main Runtime
 def app():
+    global one_instance_lock
     global config_data
     global pystray_icon
     global private_key
@@ -1617,10 +1621,15 @@ def app():
 
     # NordWireConnect Instance Check
     mainMessage("Checking for Other Existing NordWireConnect Instances..")
-    if pip_class.getAmountOfProcesses("NordWireConnect.exe") > 2: 
-        errorMessage("NordWireConnect is already running right now!")
+    lock_path = os.path.join(app_data_path, "OneInstanceLock")
+    one_instance_lock = PyKits.Lock(lock_path)
+    if one_instance_lock.exists():
+        errorMessage("Another instance of NordWireConnect is already running. Exiting now.")
         sys.exit(1)
         return
+    else:
+        try: one_instance_lock.acquire()
+        except Exception as e: errorMessage(f"There was an error trying to acquire instance lock: {str(e)}"); sys.exit(1); return
     
     # Load Configuration
     mainMessage("Loading Configuration..")
@@ -1729,7 +1738,7 @@ def app():
                         pystray.MenuItem("Auto Reconnect", unicon(change_auto_connect), checked=unicon(check_auto_connect), radio=True),
                         pystray.MenuItem("Split Private LAN Routing", unicon(change_split_lan_routing), checked=unicon(check_split_lan_routing), radio=True),
                         pystray.MenuItem("Loss Connect Protection", unicon(change_loss_connect_protection), checked=unicon(check_loss_connect_protection), radio=True),
-                        pystray.MenuItem("Threat Protection Lite", unicon(change_threat_protection_lite), checked=unicon(check_threat_protection_lite), radio=True),
+                        pystray.MenuItem("Threat Protection Lite", unicon(change_threat_protection_lite), checked=unicon(check_threat_protection_lite), radio=True)
                     )),
                     pystray.MenuItem("Plan", pystray.Menu(
                         pystray.MenuItem(unicon(differ_to_renewal_active), lambda icon, item: None, enabled=False, radio=True),
