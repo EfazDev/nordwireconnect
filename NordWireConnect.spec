@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_data_files
 import os
+import platform
 try:
     from PyInstaller.building.api import *
     from PyInstaller.building.build_main import *
@@ -10,11 +11,11 @@ except:
 
 block_cipher = None
 a = Analysis(
-    ['Main.py', 'Service.py'],
+    ['Main.py', 'WindowsService.py'],
     pathex=[],
     binaries=[],
     datas=collect_data_files("NordWireConnect") + collect_data_files("NordWireConnectService") + [('debug_flag', '.')],
-    hiddenimports=['PyKits', 'win32timezone', 'win32cred', 'pywintypes'],
+    hiddenimports=['PyKits', 'System', 'win32timezone', 'win32cred', 'pywintypes'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -25,10 +26,11 @@ a = Analysis(
     noarchive=False
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-
+main_script = next(s for s in a.scripts if s[0] == "Main")
+service_script = next(s for s in a.scripts if s[0] == "WindowsService")
 exe = EXE(
     pyz,
-    [a.scripts[-2]],
+    [main_script],
     [],
     exclude_binaries=True,
     name='NordWireConnect',
@@ -46,7 +48,7 @@ exe = EXE(
 )
 exe2 = EXE(
     pyz,
-    [a.scripts[-1]],
+    [service_script],
     [],
     exclude_binaries=True,
     name='NordWireConnectService',
@@ -62,13 +64,24 @@ exe2 = EXE(
     entitlements_file=None,
     icon=['Resources\\app_icon.ico'],
 )
-coll = COLLECT(
-    exe,
-    exe2,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='NordWireConnect',
-)
+if platform.system() == "Darwin":
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='NordWireConnect',
+    )
+else:
+    coll = COLLECT(
+        exe,
+        exe2,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='NordWireConnect',
+    )

@@ -10,13 +10,11 @@ import os
 import sys
 import time
 import PyKits
+import System
 import logging
 import win32ts # type: ignore
 import datetime
 import win32con # type: ignore
-import win32file # type: ignore
-import win32pipe # type: ignore
-import threading # type: ignore
 import subprocess
 import win32event # type: ignore
 import win32service # type: ignore
@@ -32,7 +30,9 @@ service_pipe = r"\\.\pipe\NordWireConnect"
 program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-version = "1.3.5h"
+version = "1.3.5i"
+windows_service = System.WindowsInterface()
+nord_socket = PyKits.Socket(port=61245)
 colors_class = PyKits.Colors()
 pip_class = PyKits.pip()
 
@@ -66,6 +66,11 @@ def setup_logging():
     logger.addHandler(file_handler)
     sys.stdout = PyKits.stdout(logger, logging.INFO)
     sys.stderr = PyKits.stdout(logger, logging.ERROR)
+    System.systemMessage = systemMessage
+    System.mainMessage = mainMessage
+    System.successMessage = successMessage
+    System.warnMessage = warnMessage
+    System.errorMessage = errorMessage
 
 # Pipe Administration
 def create_pipe_sa():
@@ -88,20 +93,8 @@ def create_pipe_sa():
     return sa
 
 # Unbricking
-def shell_run(cmd: str | list) -> subprocess.CompletedProcess[str]:
-    if type(cmd) is list:
-        s = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True
-        )
-    else:
-        s = subprocess.run(
-            cmd,
-            shell=True,
-            capture_output=True,
-            text=True
-        )
+def shell_run(cmd: str | list) -> subprocess.CompletedProcess[str]: 
+    s = System.shell_run(cmd)
     if s.returncode != 0: error(f"Command failed ({cmd}): {s.stderr.strip()}")
     return s
 def check_for_unbricks(idx: str) -> bool:
@@ -147,7 +140,9 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
     def SvcDoRun(self):
         info("NordWireConnect service starting")
         self.ReportServiceStatus(win32service.SERVICE_RUNNING)
-        threading.Thread(target=self.pipe_server, daemon=True).start()
+        if nord_socket.exists(): nord_socket.wait_till_free()
+        nord_socket.subscribe("NordWireConnectCommands", self.handle_command)
+        nord_socket.listen()
         while True:
             if win32event.WaitForSingleObject(self.stop_event, 2000) == win32event.WAIT_OBJECT_0: break
             self.ensure_ui_running()
@@ -162,101 +157,58 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                 time.sleep(5)
                 self.ui_running = False
                 self.last_session_id = None
-    def handle_command(self, command: str) -> str:
+    def handle_command(self, cmd_inf: dict) -> dict:
+        cmd = "<unknown>"
         try:
-            if command != "wireguard-check": info(f"Received command: {command}")
-            if command == "end-wireguard":
-                scm = win32service.OpenSCManager(None, None, win32service.SC_MANAGER_ENUMERATE_SERVICE)
-                statuses = win32service.EnumServicesStatus(scm)
-                for name, _, _ in statuses:
-                    name: str = name
-                    if name.startswith("WireGuardTunnel$"): 
-                        self.handle_command(f"uninstall-wire-tunnel {name.replace('WireGuardTunnel$', '', 1)}")
-                end = shell_run("taskkill /IM wireguard.exe /F")
-                self.connected_tunnel = None
-                return str(end.returncode)
-            elif command == "ui-opening": 
-                self.prevent_opening = False
-                return "0"
-            elif command == "ui-closing": 
-                self.prevent_opening = True
-                return "0"
-            elif command == "service-version": return version
-            elif command == "end-wireguard-installer":
-                end = shell_run("taskkill /IM wireguard-installer.exe /F")
-                self.connected_tunnel = None
-                return str(end.returncode)
-            elif command.startswith("uninstall-wire-tunnel"):
-                command = command.split(" ")
-                remove = shell_run([os.path.join(wireguard_location, "wireguard.exe"), "/uninstalltunnelservice", command[1]])
-                if self.connected_tunnel == command[1]: self.connected_tunnel = None
-                return str(remove.returncode)
-            elif command.startswith("install-wire-tunnel"):
-                self.handle_command("unbrick-adapter")
-                command = command.split(" ")
-                config_path = " ".join(command[1:])
-                add = shell_run([os.path.join(wireguard_location, "wireguard.exe"), "/installtunnelservice", config_path])
-                self.connected_tunnel = ".".join(os.path.basename(config_path).split(".")[:-1])
-                wait_for_service("WireGuardTunnel$" + self.connected_tunnel)
-                return str(add.returncode)
-            elif command.startswith("combined-disconnect"):
-                command = command.split(" ")
-                if len(command) > 1:
-                    server_name = " ".join(command[1:])
-                    self.handle_command(f"uninstall-wire-tunnel {server_name}")
-                return self.handle_command("end-wireguard")
-            elif command.startswith("reinstall-wire-tunnel"):
-                command = command.split(" ")
-                shortened_name = command[1]
-                config_path = " ".join(command[2:])
-                self.handle_command(f"uninstall-wire-tunnel {shortened_name}")
-                return self.handle_command(f"install-wire-tunnel {config_path}")
-            elif command.startswith("combined-end-wireguard"):
-                self.handle_command("end-wireguard")
-                return self.handle_command("end-wireguard-installer")
-            elif command.startswith("data-usage"):
+            cmd = cmd_inf.get("cmd", "")
+            if cmd != "wireguard-check": info(f"Received command: {cmd}")
+            if cmd == "end-wireguard": return windows_service._end_wireguard(self)
+            elif cmd == "ui-opening": self.prevent_opening = False; return {"suc": True}
+            elif cmd == "ui-closing": self.prevent_opening = True; return {"suc": True}
+            elif cmd == "service-version": return {"suc": True, "version": version}
+            elif cmd == "end-wireguard-installer": return windows_service._end_wireguard_installer()
+            elif cmd == "uninstall-wire-tunnel":
+                service_name = "NordWireConnect"
+                if not service_name: return {"suc": False, "res": "No service name provided"}
+                remove = windows_service.uninstall_wireguard_service(service_name)
+                if self.connected_tunnel == service_name: self.connected_tunnel = None
+                return {"suc": remove.returncode == 0, "res": remove.returncode}
+            elif cmd == "install-wire-tunnel":
+                self.handle_command({"cmd": "unbrick-adapter"})
+                config_path = cmd_inf.get("config_path", None)
+                if not config_path: return {"suc": False, "res": "No config path provided"}
+                add = windows_service.install_wireguard_service(config_path)
+                self.connected_tunnel = "NordWireConnect"
+                wait_for_service("WireGuardTunnel$NordWireConnect")
+                return {"suc": add.returncode == 0, "res": add.returncode}
+            elif cmd == "combined-disconnect":
+                server_name = cmd_inf.get("known_server", None)
+                if server_name: self.handle_command({"cmd": "uninstall-wire-tunnel", "server": server_name})
+                return self.handle_command({"cmd": "end-wireguard"})
+            elif cmd == "reinstall-wire-tunnel":
+                config_path = cmd_inf.get("config_path", None)
+                self.handle_command({"cmd": "unbrick-adapter"})
+                if not config_path: return {"suc": False, "res": "No config path provided"}
+                add = windows_service.reinstall_wireguard_service("NordWireConnect", config_path)
+                self.connected_tunnel = "NordWireConnect"
+                wait_for_service("WireGuardTunnel$NordWireConnect")
+                return {"suc": add.returncode == 0, "res": add.returncode}
+            elif cmd == "combined-end-wireguard":
+                self.handle_command({"cmd": "end-wireguard"})
+                return self.handle_command({"cmd": "end-wireguard-installer"})
+            elif cmd == "data-usage":
                 if self.connected_tunnel:
-                    wg_check = shell_run([os.path.join(wireguard_location, "wg.exe"), "show"])
+                    wg_check = windows_service.run_wireguard_command(["show"])
                     output = wg_check.stdout.strip()
                     lines = output.splitlines()
                     for l in lines:
                         l = l.strip()
-                        if "transfer:" in l: return l.replace("transfer: ", "").replace(" received", "").replace(" sent", "").replace(", ", ",")
-                return "0,0"
-            elif command.startswith("router-ip-info"):
-                if True: return "disabled,disabled"
-                route_out = shell_run("route print 0.0.0.0").stdout.replace("[SEPARATE]", "") + "\n[SEPARATE]\n" + shell_run("route print ::/0").stdout.replace("[SEPARATE]", "")
-                parsing_mode = None
-                active = False
-                ipv4 = None
-                ipv6 = None
-                for l in route_out.splitlines():
-                    if "IPv4 Route Table" in l: parsing_mode = 1
-                    elif "IPv6 Route Table" in l: parsing_mode = 2
-                    elif "[SEPARATE]" in l: 
-                        parsing_mode = None
-                        active = False
-                    elif "Active Routes:" in l: active = True
-                    elif "Persistent Routes:" in l: active = False
-                    elif parsing_mode and active:
-                        if not ipv4 and "0.0.0.0" in l and parsing_mode == 1:
-                            for p in l.split(" "):
-                                p = p.strip()
-                                if not p: continue
-                                if p == "0.0.0.0": continue
-                                if p.count(".") == 3: 
-                                    ipv4 = p
-                                    break
-                        elif not ipv6 and "::/0" in l and parsing_mode == 2:
-                            for p in l.split(" "):
-                                p = p.strip()
-                                if not p: continue
-                                if p == "::/0": continue
-                                if ":" in p: 
-                                    ipv6 = p
-                                    break
-                return f"{ipv4},{ipv6}"
-            elif command.startswith("unbrick-adapter"):
+                        if "transfer:" in l: 
+                            l = l.replace("transfer: ", "").replace(" received", "").replace(" sent", "").replace(", ", ",").split(",")
+                            if len(l) == 2:
+                                return {"suc": True, "download": l[0], "upload": l[1]}
+                return {"suc": False, "upload": "0", "download": "0"}
+            elif cmd == "unbrick-adapter":
                 get_interfaces_req = shell_run("netsh interface ipv4 show route").stdout + shell_run("netsh interface ipv6 show route").stdout
                 interface_indexes = {
                     line.split()[-2] for line in get_interfaces_req.splitlines()
@@ -267,19 +219,19 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                     if not check_for_unbricks(idx): continue
                     shell_run(f"netsh interface ipv4 set interface {idx} forwarding=disabled weakhostsend=disabled weakhostreceive=disabled")
                     shell_run(f"netsh interface ipv6 set interface {idx} forwarding=disabled weakhostsend=disabled weakhostreceive=disabled")
-                return "0"
-            elif command == "wireguard-check":
-                wg_check = shell_run([os.path.join(wireguard_location, "wg.exe"), "show"])
+                return {"suc": True}
+            elif cmd == "wireguard-check":
+                wg_check = windows_service.run_wireguard_command(["show"])
                 output = wg_check.stdout.strip()
-                if not output: return "1"
-                elif "latest handshake: never" in output.lower(): return "1"
-                elif "latest handshake" in output.lower(): return "0"
-                else: return "1"
-            elif command == "connection-status":
-                if self.connected_tunnel: return self.connected_tunnel
-                else: return "NotConnected"
-        except Exception as e: error(f"Failed running pipe command ({command}): {repr(e)}")
-        return "1"
+                if not output: return {"suc": True, "active": False}
+                elif "latest handshake: never" in output.lower(): return {"suc": True, "active": False}
+                elif "latest handshake" in output.lower(): return {"suc": True, "active": True}
+                else: return {"suc": True, "active": False}
+            elif cmd == "connection-status":
+                if self.connected_tunnel: return {"suc": True, "active": True, "tunnel": self.connected_tunnel}
+                else: return {"suc": True, "active": False, "tunnel": "NotConnected"}
+        except Exception as e: error(f"Failed running pipe command ({cmd}): {repr(e)}")
+        return {"suc": False, "res": "1"}
     def ensure_ui_running(self):
         try:
             session_id = win32ts.WTSGetActiveConsoleSessionId()
@@ -314,37 +266,7 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
             self.ui_running = False
             self.last_session_id = None
             time.sleep(5)
-    def pipe_server(self):
-        info("Pipe server starting")
-        while win32event.WaitForSingleObject(self.stop_event, 0) != win32event.WAIT_OBJECT_0:
-            pipe = None
-            try:
-                sa = create_pipe_sa()
-                pipe = win32pipe.CreateNamedPipe(
-                    service_pipe,
-                    win32pipe.PIPE_ACCESS_DUPLEX,
-                    win32pipe.PIPE_TYPE_MESSAGE |
-                    win32pipe.PIPE_READMODE_MESSAGE |
-                    win32pipe.PIPE_WAIT,
-                    win32pipe.PIPE_UNLIMITED_INSTANCES,
-                    4096,
-                    4096,
-                    0,
-                    sa
-                )
-                win32pipe.ConnectNamedPipe(pipe, None)
-                while True:
-                    try: _, data = win32file.ReadFile(pipe, 4096)
-                    except Exception: break
-                    command = data.decode().strip()
-                    response = self.handle_command(command)
-                    win32file.WriteFile(pipe, response.encode())
-            except Exception as e: error(f"Pipe error: {repr(e)}")
-            finally:
-                if pipe:
-                    try: win32file.CloseHandle(pipe)
-                    except Exception: pass
-
+    
 # Service Runtime
 if __name__ == "__main__":
     colors_class.fix_windows_ansi()
