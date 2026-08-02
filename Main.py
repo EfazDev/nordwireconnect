@@ -134,7 +134,7 @@ full_files = False
 pystray_icon = None
 stop_app = False
 add_data_count = 0
-version = "1.3.5j"
+version = "1.3.5k"
 cached_asn_data = {"loaded": False, "names": [], "starts": [], "ends": []}
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
@@ -700,11 +700,19 @@ def run_cache():
     all_servers = requests.get(f"https://api.nordvpn.com/v1/servers/recommendations?&filters\\[servers_technologies\\]\\[identifier\\]=wireguard_udp&limit=10000")
     raw_servers = (all_servers.json[:500] if (config_data.get("optimize_server_list", False) == True) else all_servers.json) if all_servers.ok else []
     raw_all_servers = all_servers.json if all_servers.ok else []
+    if len(raw_all_servers) == 0 or len(raw_servers) == 0: 
+        mainMessage("Unable to get current servers from NordVPN API. Depending on stored cache.")
+        return
     all_cities = {}
     while not tunnel_check(timeout=1): time.sleep(0.1)
     all_countries = requests.get("https://api.nordvpn.com/v1/countries")
     all_countries = all_countries.json if all_countries.ok else []
     all_servers_by_id = {}
+    if len(all_countries) == 0: 
+        mainMessage("Unable to get current list of Countries from NordVPN API. Depending on stored cache.")
+        if os.path.exists(os.path.join(app_data_path, "NordCountryCache.json")):
+            with open(os.path.join(app_data_path, "NordCountryCache.json"), "r") as f: all_countries = json.load(f)
+        else: return
     for s in raw_all_servers:
         for l in s["locations"]:
             c = l["country"]["city"]
@@ -714,22 +722,23 @@ def run_cache():
     all_asns = {}
     while not tunnel_check(timeout=1): time.sleep(0.1)
     all_asns_req = requests.download("https://iptoasn.com/data/ip2asn-v4.tsv.gz", os.path.join(app_data_path, "ip2asn-v4.tsv.gz"))
-    all_asns = system_class.unarchive_asn_database(os.path.join(app_data_path, "ip2asn-v4.tsv.gz")) if all_asns_req.ok else []
-    parsed_data = []
-    for d in all_asns:
-        s_ip = int(ipaddress.ip_address(d.get("s_ip")))
-        e_ip = int(ipaddress.ip_address(d.get("e_ip")))
-        parsed_data.append((s_ip, e_ip, d.get("asn_name")))
-    parsed_data.sort(key=lambda x: x[0])
-    cached_asn_data["starts"] = [x[0] for x in parsed_data]
-    cached_asn_data["ends"] = [x[1] for x in parsed_data]
-    cached_asn_data["names"] = [x[2] for x in parsed_data]
-    cached_asn_data["loaded"] = True
+    if all_asns_req.ok:
+        all_asns = system_class.unarchive_asn_database(os.path.join(app_data_path, "ip2asn-v4.tsv.gz")) if all_asns_req.ok else []
+        parsed_data = []
+        for d in all_asns:
+            s_ip = int(ipaddress.ip_address(d.get("s_ip")))
+            e_ip = int(ipaddress.ip_address(d.get("e_ip")))
+            parsed_data.append((s_ip, e_ip, d.get("asn_name")))
+        parsed_data.sort(key=lambda x: x[0])
+        cached_asn_data["starts"] = [x[0] for x in parsed_data]
+        cached_asn_data["ends"] = [x[1] for x in parsed_data]
+        cached_asn_data["names"] = [x[2] for x in parsed_data]
+        cached_asn_data["loaded"] = True
+        with open(os.path.join(app_data_path, "NordASNCache.json"), "w") as f: json.dump(all_asns, f)
     with open(os.path.join(app_data_path, "NordServerCache.json"), "w") as f: json.dump(raw_servers, f)
     with open(os.path.join(app_data_path, "NordCountryCache.json"), "w") as f: json.dump(all_countries, f)
     with open(os.path.join(app_data_path, "NordCityCache.json"), "w") as f: json.dump(all_cities, f)
     with open(os.path.join(app_data_path, "NordServerIDCache.json"), "w") as f: json.dump(all_servers_by_id, f)
-    with open(os.path.join(app_data_path, "NordASNCache.json"), "w") as f: json.dump(all_asns, f)
 def send_command(cmd: str, args: dict={}) -> dict: 
     res = nord_socket.request("NordWireConnectCommands", {"cmd": cmd, **args}, timeout=60)
     if res is None: return {}
@@ -1709,6 +1718,7 @@ def app():
                         pystray.MenuItem("Clear Server Connected History", create_mini_func(unicon(clear_server_connected_history))),
                         pystray.MenuItem("Brute End Wireguard", create_mini_func(brute_end_wireguard)),
                         pystray.MenuItem("Reset DNS Cache", lambda icon, item: unicon(reset_dns_cache)),
+                        pystray.MenuItem("Reset Server Cache", lambda icon, item: create_mini_func(run_cache)),
                         pystray.MenuItem("Reset Networking", lambda icon, item: ui_queue.put(reset_networking)),
                         pystray.MenuItem("Clear Wireguard .conf Files", lambda icon, item: ui_queue.put(clear_wireguard_conf_files)),
                         pystray.MenuItem("Clear Configuration", lambda icon, item: ui_queue.put(clear_configuration)),
