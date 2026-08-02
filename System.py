@@ -159,14 +159,19 @@ class WindowsInterface(SystemInterface):
     def run_wireguard_command(self, command: list): return subprocess.run([self.wg_exe] + command, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
     def install_wireguard_service(self, path: str): return subprocess.run([self.wireguard_exe, "/installtunnelservice", path], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
     def reinstall_wireguard_service(self, name: str, path: str): return subprocess.run([self.wg_exe, "syncconf", name, path], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-    def uninstall_wireguard_service(self, name: str): return subprocess.run([self.wireguard_exe, "/uninstalltunnelservice", name], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    def uninstall_wireguard_service(self, name: str): 
+        if not self._service_exists("WireGuardTunnel$" + name): return {"suc": False, "res": 1}
+        return subprocess.run([self.wireguard_exe, "/uninstalltunnelservice", name], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    def _service_exists(self, service_name: str) -> bool:
+        try: return subprocess.run(["sc", "query", service_name], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW).returncode == 0
+        except Exception: return False
     def _end_wireguard(self, service):
         scm = self._win32service.OpenSCManager(None, None, self._win32service.SC_MANAGER_ENUMERATE_SERVICE)
         statuses = self._win32service.EnumServicesStatus(scm)
         for name, _, _ in statuses:
             name: str = name
             if name.startswith("WireGuardTunnel$"): 
-                service.handle_command(f"uninstall-wire-tunnel", {"server": name.replace('WireGuardTunnel$', '', 1)})
+                service.handle_command({"cmd": "uninstall-wire-tunnel", "server": name.replace('WireGuardTunnel$', '', 1)})
         self.connected_tunnel = None
         return {"suc": True, "res": 0}
     def _end_wireguard_installer(self):
