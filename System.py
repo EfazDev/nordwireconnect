@@ -7,24 +7,15 @@ import PyKits
 
 def shell_run(cmd: str | list, timeout: int=30) -> subprocess.CompletedProcess[str]:
     no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    if type(cmd) is list:
-        s = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            creationflags=no_win
-        )
-    else:
-        s = subprocess.run(
-            cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            creationflags=no_win
-        )
-    return s
+    return subprocess.run(
+        cmd,
+        shell=not isinstance(cmd, list),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        creationflags=no_win
+    )
 def systemMessage(message: str): raise NotImplementedError
 def mainMessage(message: str): raise NotImplementedError
 def warnMessage(message: str): raise NotImplementedError
@@ -176,10 +167,10 @@ class WindowsInterface(SystemInterface):
     def setup_startup_service(self):
         name = "NordWireConnectService"
         service_exe = os.path.join(self.app_install_path, "NordWireConnectService.exe")
-        subprocess.run(["sc", "stop", name], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        subprocess.run(["sc", "delete", name], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        subprocess.run(["sc", "create", name, f"binPath={service_exe}", "start=auto"], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        subprocess.run(["sc", "start", name], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        subprocess.run(["sc", "stop", name], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+        subprocess.run(["sc", "delete", name], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+        subprocess.run(["sc", "create", name, f"binPath={service_exe}", "start=auto"], check=True, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+        subprocess.run(["sc", "start", name], check=True, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
     def service_exists(self): return nord_socket.exists() and pip_class.getIfProcessIsOpened("NordWireConnectService")
     def start_service(self):
         service_exe = os.path.join(self.app_install_path, "NordWireConnectService.exe")
@@ -189,7 +180,7 @@ class WindowsInterface(SystemInterface):
         else:
             with open(bat_path, "w") as f: f.write(f"@echo off\nsc delete NordWireConnectService\nsc create NordWireConnectService binPath= \"{service_exe}\" start=auto\nsc start NordWireConnectService\n")
         self.run_sudo_cmd([f"\"{bat_path}\""])
-    def run_wireguard_command(self, command: list, timeout: int=10): return subprocess.run([self.wg_exe] + command, capture_output=True, text=True, timeout=timeout, creationflags=subprocess.CREATE_NO_WINDOW)
+    def run_wireguard_command(self, command: list, timeout: int=10): return subprocess.run([self.wg_exe] + command, capture_output=True, text=True, timeout=timeout, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
     def get_service_state(self, service_name: str):
         scm = None
         svc = None
@@ -215,15 +206,15 @@ class WindowsInterface(SystemInterface):
     def install_wireguard_service(self, path: str):
         tunnel_name = os.path.splitext(os.path.basename(path))[0]
         if self._service_exists("WireGuardTunnel$" + tunnel_name): self.uninstall_wireguard_service(tunnel_name)
-        return subprocess.run([self.wireguard_exe, "/installtunnelservice", path], capture_output=True, text=True, timeout=25, check=False, creationflags=subprocess.CREATE_NO_WINDOW)
-    def reinstall_wireguard_service(self, name: str, path: str): return subprocess.run([self.wg_exe, "syncconf", name, path], capture_output=True, text=True, timeout=15, check=False, creationflags=subprocess.CREATE_NO_WINDOW)
+        return subprocess.run([self.wireguard_exe, "/installtunnelservice", path], capture_output=True, text=True, timeout=25, check=False, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+    def reinstall_wireguard_service(self, name: str, path: str): return subprocess.run([self.wg_exe, "syncconf", name, path], capture_output=True, text=True, timeout=15, check=False, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
     def uninstall_wireguard_service(self, name: str):
         svc_name = "WireGuardTunnel$" + name
         if not self._service_exists(svc_name): return subprocess.CompletedProcess(args=[self.wireguard_exe, "/uninstalltunnelservice", name], returncode=0, stdout="", stderr="")
-        res = subprocess.run([self.wireguard_exe, "/uninstalltunnelservice", name], capture_output=True, text=True, timeout=20, check=False, creationflags=subprocess.CREATE_NO_WINDOW)
+        res = subprocess.run([self.wireguard_exe, "/uninstalltunnelservice", name], capture_output=True, text=True, timeout=20, check=False, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
         if res.returncode != 0 and self._service_exists(svc_name):
-            subprocess.run(["sc", "stop", svc_name], capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
-            subprocess.run(["sc", "delete", svc_name], capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run(["sc", "stop", svc_name], capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+            subprocess.run(["sc", "delete", svc_name], capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
         self.wait_for_service_deleted(svc_name, timeout=12.0)
         return res
     def _end_wireguard(self, service):
@@ -315,9 +306,9 @@ class WindowsInterface(SystemInterface):
         try: self.uninstall_wireguard_service("NordWireConnect")
         except Exception: pass
         mainMessage("Uninstalling Service..")
-        subprocess.run(["sc", "stop", "NordWireConnectService"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        subprocess.run(["sc", "delete", "NordWireConnectService"], capture_output=True, check=False, creationflags=subprocess.CREATE_NO_WINDOW)
-        subprocess.run(["taskkill", "/IM", "NordWireConnectService.exe", "/F"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        subprocess.run(["sc", "stop", "NordWireConnectService"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+        subprocess.run(["sc", "delete", "NordWireConnectService"], capture_output=True, check=False, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+        subprocess.run(["taskkill", "/IM", "NordWireConnectService.exe", "/F"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
         time.sleep(1)
         if os.path.exists(os.path.join(self.app_install_path, "Service", "NordWireConnectService.exe")):
             try: os.remove(os.path.join(self.app_install_path, "Service", "NordWireConnectService.exe"))
@@ -332,10 +323,10 @@ class WindowsInterface(SystemInterface):
             errorMessage(f"Refusing to remove unexpected install path: {target_dir}")
             return
         cmd = f"timeout /t 2 >nul & taskkill /IM NordWireConnect.exe /F >nul 2>&1 & rmdir /s /q \"{target_dir}\""
-        subprocess.Popen(["cmd.exe", "/c", cmd], creationflags=subprocess.CREATE_NO_WINDOW)
+        subprocess.Popen(["cmd.exe", "/c", cmd], creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
         sys.exit(0)
     def reset_dns_cache(self):
-        try: subprocess.run(["ipconfig", "/flushdns"], check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        try: subprocess.run(["ipconfig", "/flushdns"], check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
         except Exception as e: errorMessage(f"Unable to reset DNS Cache: {str(e)}")
     def reset_networking(self):
         try:
