@@ -1,19 +1,14 @@
 @echo off
 setlocal
-set "PATH=%~dp0UPX;%PATH%"
 
 rem Build & Sign NordWireConnect Debug (Nuitka Standalone)
 echo true> debug_flag
 if exist Installer rmdir /s /q Installer
 python -m nuitka ^
     --standalone ^
-    --lto=no ^
-    --onefile-no-compression ^
     --assume-yes-for-downloads ^
     --remove-output ^
     --enable-plugin=tk-inter ^
-    --enable-plugin=upx ^
-    --upx-binary="%~dp0UPX\upx.exe" ^
     --windows-console-mode=force ^
     --windows-icon-from-ico="Resources/app_icon.ico" ^
     --include-data-files="debug_flag=debug_flag" ^
@@ -27,7 +22,7 @@ python -m nuitka ^
     --include-module=win32serviceutil ^
     --include-package=truststore ^
     --company-name="EfazDev" ^
-    --product-name="NordWireConnect (Debug)" ^
+    --product-name="NordWireConnectDebug" ^
     --file-version="1.3.5.0" ^
     --product-version="1.3.5.0" ^
     --output-dir="Installer" ^
@@ -48,7 +43,6 @@ rmdir /s /q Installer
 rem Build & Sign NordWireConnectDebugInstaller (Nuitka Onefile)
 python -m nuitka ^
     --onefile ^
-    --lto=no ^
     --assume-yes-for-downloads ^
     --remove-output ^
     --windows-console-mode=force ^
@@ -60,7 +54,7 @@ python -m nuitka ^
     --include-module=win32api ^
     --include-module=win32con ^
     --company-name="EfazDev" ^
-    --product-name="NordWireConnect Debug Installer" ^
+    --product-name="NordWireConnectDebugInstaller" ^
     --file-version="1.3.5.0" ^
     --product-version="1.3.5.0" ^
     --output-dir="dist" ^

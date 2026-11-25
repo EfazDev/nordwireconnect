@@ -85,7 +85,9 @@ class WindowsInterface(SystemInterface):
         import pythoncom # type: ignore
         import ctypes # type: ignore
         import gzip # type: ignore
-        super().__init__(os.getenv("ProgramFiles"), os.path.join(os.getenv("LOCALAPPDATA"), "NordWireConnect"), os.path.join(os.getenv("ProgramFiles"), "WireGuard"))
+        pf_dir = os.getenv("ProgramFiles") or r"C:\Program Files"
+        appdata_dir = os.getenv("LOCALAPPDATA") or os.path.join(os.getenv("USERPROFILE") or r"C:\Windows\System32\config\systemprofile", "AppData", "Local")
+        super().__init__(pf_dir, os.path.join(appdata_dir, "NordWireConnect"), os.path.join(pf_dir, "WireGuard"))
         self._win32crypt = win32crypt
         self._win32com_client = win32com.client
         self._pythoncom = pythoncom
