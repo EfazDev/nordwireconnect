@@ -152,7 +152,10 @@ full_files = False
 pystray_icon = None
 stop_app = False
 add_data_count = 0
-version = "1.3.5p"
+version = "1.3.5q"
+current_icon_name = "app_icon.ico"
+tray_ready = threading.Event()
+icon_lock = threading.Lock()
 cached_asn_data = {"loaded": False, "names": [], "starts": [], "ends": []}
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
@@ -286,11 +289,21 @@ def notification(title: str, message: str):
         if pystray_icon: pystray_icon.notify(message, title)
     addToThread(a, ())
 def set_icon(img: str):
-    image = getImageObj(os.path.join(program_files, "Resources", img))
-    if pystray_icon:
-        pystray_icon.icon = image
-        update_tray()
-def setup(): pystray_icon.visible = True
+    global current_icon_name
+    with icon_lock:
+        current_icon_name = img
+        if pystray_icon and tray_ready.is_set():
+            image = getImageObj(os.path.join(program_files, "Resources", img))
+            pystray_icon.icon = image
+            update_tray()
+def setup():
+    pystray_icon.visible = True
+    with icon_lock:
+        tray_ready.set()
+        if current_icon_name != "app_icon.ico":
+            image = getImageObj(os.path.join(program_files, "Resources", current_icon_name))
+            pystray_icon.icon = image
+            update_tray()
 def needing_state(): system_class.needing_state()
 def unneeding_state(): system_class.unneeding_state()
 def quit_app():
@@ -2039,6 +2052,8 @@ def app():
     # Run Main Loop
     try:
         mainMessage("Finishing app load!")
+        apply_window_icon(tk_root, True)
+        pystray_icon.run_detached(unicon(setup))
         threading.Thread(target=background_startup_sync, daemon=True).start()
         addToThread(connect_session, (), connection=True)
         threading.Thread(target=worker, daemon=True).start()
@@ -2046,9 +2061,7 @@ def app():
         tk_root.after(0, update_ui_timer)
         if config_data.get("check_for_updates", True) == True: threading.Thread(target=auto_check_for_updates, daemon=True).start()
         tk_root.after(100, check_stop_flag)
-        apply_window_icon(tk_root, True)
         tk_root.after(50, poll_ui_queue)
-        pystray_icon.run_detached(unicon(setup))
         tk.mainloop()
     except Exception as e: errorMessage(f"Unable to run app. Exception: {trace(e)}"); sys.exit(1); return
 if __name__ == "__main__": app()
