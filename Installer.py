@@ -23,61 +23,75 @@ import subprocess
 
 # Variables
 pip_class = PyKits.pip()
-colors_class = PyKits.Colors()
+terminal = PyKits.Terminal()
 main_os = platform.system()
 pre_program_files = os.getenv("ProgramFiles")
 app_data_path = os.path.join(pip_class.getLocalAppData(), "NordWireConnect")
 program_files = os.path.join(pre_program_files, "NordWireConnect")
 cur_path = os.path.dirname(os.path.abspath(__file__))
-version = "1.3.5k"
+version = "1.3.5l"
 
 # Logging and Messages
-def systemMessage(message: str): colors_class.print(message, colors_class.hex_to_ansi2("#3E5FFF"))
-def mainMessage(message: str): colors_class.print(message, 15)
+def systemMessage(message: str): terminal.print_ansi(message, PyKits.Terminal.hex_to_ansi("#3E5FFF"))
+def mainMessage(message: str): terminal.print_ansi(message, 15)
 def errorMessage(message: str, title: str="Uh oh!"): 
-    colors_class.print(message, 9)
+    terminal.print_ansi(message, 9)
     if title == "": title = "NordWireConnect"
     elif title != "NordWireConnect": title = f"NordWireConnect: {title}"
     def a(): ctypes.windll.user32.MessageBoxW(0, message, title, 0x0 | 0x10)
     threading.Thread(target=a, daemon=True).start()
-def warnMessage(message: str): colors_class.print(message, 11)
-def successMessage(message: str): colors_class.print(message, 10)
+def warnMessage(message: str): terminal.print_ansi(message, 11)
+def successMessage(message: str): terminal.print_ansi(message, 10)
+def prune_old_logs(log_path: str, prefix: str, keep: int=15):
+    try:
+        entries = [os.path.join(log_path, f) for f in os.listdir(log_path) if f.startswith(prefix) and f.endswith(".log")]
+        if len(entries) > keep:
+            entries.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+            for stale in entries[keep:]:
+                try: os.remove(stale)
+                except Exception: pass
+    except Exception: pass
 def setup_logging():
+    global terminal
     handler_name = "Installer"
     log_path = os.path.join(app_data_path, "Logs")
-    if not os.path.exists(log_path): os.makedirs(log_path,mode=511)
-    generated_file_name = f'NordWireConnect_{handler_name}_{datetime.datetime.now().strftime("%B_%d_%Y_%H_%M_%S_%f")}.log' 
-    if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding='utf-8')
+    if not os.path.exists(log_path): os.makedirs(log_path, mode=511)
+    prune_old_logs(log_path, f"NordWireConnect_{handler_name}_", keep=15)
+    generated_file_name = f"NordWireConnect_{handler_name}_{datetime.datetime.now().strftime('%B_%d_%Y_%H_%M_%S_%f')}.log"
+    if hasattr(sys.stdout, "reconfigure"):
+        try: sys.stdout.reconfigure(encoding="utf-8")
+        except Exception: pass
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
     file_handler = logging.FileHandler(os.path.join(log_path, generated_file_name), encoding="utf-8")
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-    if sys.stdout:
-        try:
-            stdout_stream = logging.StreamHandler(sys.stdout)
-            stdout_stream.setLevel(logging.INFO)
-            stdout_stream.setFormatter(logging.Formatter("%(message)s"))
-            logger.addHandler(stdout_stream)
-        except Exception: pass
     logger.addHandler(file_handler)
-    sys.stdout = PyKits.stdout(logger, logging.INFO)
-    sys.stderr = PyKits.stdout(logger, logging.ERROR)
+    terminal = PyKits.Terminal(logger=logger, log_level=logging.INFO)
+    err_terminal = PyKits.Terminal(logger=logger, log_level=logging.ERROR)
+    terminal.inject_stdout()
+    err_terminal.inject_stderr()
 
 # Installer
+def get_if_compiled() -> bool: return bool(getattr(sys, "frozen", False) or "__compiled__" in globals())
+def get_outer_executable() -> str: return os.path.abspath(sys.argv[0]) if get_if_compiled() else os.path.abspath(sys.executable)
 def relaunch_as_admin():
-    params = " ".join(f'"{arg}"' for arg in sys.argv)
+    is_comp = get_if_compiled()
+    target_exe = get_outer_executable()
+    args = sys.argv[1:] if is_comp else sys.argv
+    params = " ".join(f"\"{arg}\"" for arg in args)
     ctypes.windll.shell32.ShellExecuteW(
         None,
         "runas",
-        sys.executable,
+        target_exe,
         params,
         None,
         1
     )
     sys.exit(0)
 def install():
-    if not sys.executable.startswith(pre_program_files):
+    outer_exe = get_outer_executable()
+    if not outer_exe.lower().startswith(pre_program_files.lower()):
         if not pip_class.getIfRunningWindowsAdmin():
             mainMessage("Please relaunch this program as Admin to continue installation!")
             relaunch_as_admin()
@@ -85,8 +99,11 @@ def install():
         
         # Unzip Install Files
         mainMessage("Exporting Installation Files..")
-        zip_file = os.path.join(os.path.dirname(__file__), "NordWireConnect.zip")
-        res = pip_class.unzipFile(zip_file, os.path.join(os.path.dirname(__file__), "Installer"), ["NordWireConnect.exe", "NordWireConnectService.exe"])
+        bundle_dir = os.path.dirname(os.path.abspath(__file__))
+        zip_file = os.path.join(bundle_dir, "NordWireConnect.zip")
+        staging_dir = os.path.join(app_data_path, "StagingInstaller")
+        if os.path.exists(staging_dir): shutil.rmtree(staging_dir, ignore_errors=True)
+        res = pip_class.unzipFile(zip_file, staging_dir, ["NordWireConnect.exe", "NordWireConnectService.exe"])
         if res.returncode != 0:
             errorMessage("Unable to unzip NordWireConnect installation zip.")
             return
@@ -94,42 +111,38 @@ def install():
         # Check for Installation and Prepare
         mainMessage("Preparing for installation..")
         os.makedirs(program_files, exist_ok=True)
-        subprocess.run("sc stop NordWireConnectService", shell=True)
-        subprocess.run("taskkill /IM NordWireConnectService.exe /F", shell=True)
-        subprocess.run("taskkill /IM NordWireConnect.exe /F", shell=True)
+        no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.run(["sc", "stop", "NordWireConnectService"], capture_output=True, creationflags=no_win)
+        subprocess.run(["taskkill", "/IM", "NordWireConnectService.exe", "/F"], capture_output=True, creationflags=no_win)
+        subprocess.run(["taskkill", "/IM", "NordWireConnect.exe", "/F"], capture_output=True, creationflags=no_win)
         time.sleep(3)
-        if os.path.exists(os.path.join(program_files, "Main")): 
-            shutil.rmtree(os.path.join(program_files, "Main"), ignore_errors=True)
-        if os.path.exists(os.path.join(program_files, "Service")): 
-            shutil.rmtree(os.path.join(program_files, "Service"), ignore_errors=True)
-        if os.path.exists(os.path.join(program_files, "resources")): 
-            shutil.rmtree(os.path.join(program_files, "resources"), ignore_errors=True)
-        if os.path.exists(os.path.join(program_files, "ConnectConfig.json")): 
-            os.remove(os.path.join(program_files, "ConnectConfig.json"))
-        if os.path.exists(os.path.join(program_files, "NordServerCache.json")): 
-            os.remove(os.path.join(program_files, "NordServerCache.json"))
+        for entry in os.listdir(program_files):
+            if entry.lower() == "logs": continue
+            entry_path = os.path.join(program_files, entry)
+            try:
+                if os.path.isdir(entry_path): shutil.rmtree(entry_path, ignore_errors=True)
+                else: os.remove(entry_path)
+            except Exception: pass
         
         # Copy Install Files
         mainMessage("Copying Installation Files..")
-        shutil.copytree(os.path.join(os.path.dirname(__file__), "Resources"), os.path.join(program_files, "Resources"), dirs_exist_ok=True) 
-        shutil.copytree(os.path.join(os.path.dirname(__file__), "Installer"), program_files, dirs_exist_ok=True)
+        shutil.copytree(os.path.join(bundle_dir, "Resources"), os.path.join(program_files, "Resources"), dirs_exist_ok=True) 
+        shutil.copytree(staging_dir, program_files, dirs_exist_ok=True)
+        shutil.rmtree(staging_dir, ignore_errors=True)
 
         # Create Service
         mainMessage("Creating NordWireConnect Service..")
+        subprocess.run(["sc", "delete", "NordWireConnectService"], capture_output=True, check=False, creationflags=no_win)
         subprocess.run(
-            "sc delete NordWireConnectService",
+            f"sc create NordWireConnectService binPath= \"{os.path.join(program_files, 'NordWireConnectService.exe')}\" start=auto",
             shell=True,
-            check=False
-        )
-        subprocess.run(
-            f'sc create NordWireConnectService binPath= "{os.path.join(program_files, "NordWireConnectService.exe")}" start=auto',
-            shell=True,
-            check=True
+            check=True,
+            creationflags=no_win
         )
 
         # Start Service
         mainMessage("Starting NordWireConnect Service..")
-        subprocess.run("sc start NordWireConnectService", shell=True)
+        subprocess.run(["sc", "start", "NordWireConnectService"], capture_output=True, creationflags=no_win)
 
         # Finalize and Setup Registry
         mainMessage("Setting up registry..")
@@ -155,9 +168,6 @@ def setup_registry():
         win32api.RegSetValueEx(registry_key, "Publisher", 0, win32con.REG_SZ, "EfazDev")
         win32api.RegSetValueEx(registry_key, "EstimatedSize", 0, win32con.REG_DWORD, min(get_folder_size(program_files, formatWithAbbreviation=False) // 1024, 0xFFFFFFFF))
         win32api.RegCloseKey(registry_key)
-        wireguard_key = win32api.RegCreateKey(win32con.HKEY_LOCAL_MACHINE, r"SOFTWARE\WireGuard")
-        win32api.RegSetValueEx(wireguard_key, "DangerousScriptExecution", 0, win32con.REG_DWORD, 1)
-        win32api.RegCloseKey(wireguard_key)
     except Exception as e: errorMessage(f"Unable to setup registry: {str(e)}")
 def format_size(size_bytes: int) -> str:
     if size_bytes == 0: return "0 Bytes"
@@ -184,10 +194,9 @@ def get_folder_size(folder_path: str, formatWithAbbreviation: bool=True) -> typi
 # Main Runtime
 def app():
     global cur_path
-    colors_class.fix_windows_ansi()
+    os.makedirs(app_data_path, exist_ok=True)
     setup_logging()
     systemMessage(f"{'-'*5:^5} NordWireConnect v{version} {'-'*5:^5}")
-    os.makedirs(app_data_path, exist_ok=True)
 
     # Only for Windows
     if main_os != "Windows":
@@ -196,8 +205,7 @@ def app():
         return
     
     # Prepare NordWireConnect
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'): cur_path = os.path.dirname(sys.executable)
-    else: cur_path = os.path.dirname(sys.argv[0])
+    cur_path = os.path.dirname(get_outer_executable())
 
     try: install()
     except Exception as e: errorMessage(f"There was an error during Installation Handler: {str(e)}"); sys.exit(1); return

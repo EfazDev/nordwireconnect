@@ -11,3 +11,7 @@ Installer
 .DS_Store
 installer
 __pycache__
+*.build
+*.dist
+*.onefile-build
+nuitka-crash-report.xml

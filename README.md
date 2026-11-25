@@ -31,7 +31,7 @@ NordWireConnect and Wireguard will require Administrator permissions before inst
 - Other Tweaks!
 
 ## Rebuilding
-The following command (package dependencies) and Python 3.12+ are needed to rebuild the NordWireConnect app: `pip install pywin32 Pillow pystray pyinstaller truststore`. After that all the packages are installed, run the Rebuild.bat file to build and create an exe file in a dist folder (will automatically create if not found).
+The following command (package dependencies) and Python 3.12+ (with a C compiler such as MSVC Build Tools or MinGW64, which Nuitka can download automatically) are needed to rebuild the NordWireConnect app: `pip install pywin32 Pillow pystray nuitka zstandard truststore`. After all packages are installed, run the `Rebuild.bat` file to compile and package an installer `.exe` in the `dist` folder (automatically created if not found).
 
 ## Uninstall
 If you want to uninstall the program, you may go to the Installed Apps menu in Windows Settings and uninstall the app. This will also require administrative permissions.
