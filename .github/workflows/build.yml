@@ -21,6 +21,11 @@ jobs:
                 python-version: "3.15"
                 architecture: x64
                 cache: pip
+            - name: Install dependencies
+              shell: pwsh
+              run: |
+                python -m pip install --upgrade pip
+                python -m pip install -r requirements.txt
             - name: Download UPX (win64)
               shell: pwsh
               run: |
