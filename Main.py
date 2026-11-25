@@ -152,7 +152,7 @@ full_files = False
 pystray_icon = None
 stop_app = False
 add_data_count = 0
-version = "1.3.5o"
+version = "1.3.5p"
 cached_asn_data = {"loaded": False, "names": [], "starts": [], "ends": []}
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
@@ -571,25 +571,30 @@ def tkinter_install_wireguard_updates(latest_ver: str):
                 return
     except Exception as e: errorMessage(f"Unable to check for new updates due to an exception: {trace(e)}")
 def tkinter_install_updates(latest_ver: str):
+    global stop_app
     try:
         mainMessage(f"Update v{latest_ver} is now available!")
         confirmed = messagebox.askyesno("Update Available!", f"NordWireConnect v{latest_ver} is now available to be downloaded from GitHub!\nDo you wish to proceed?", icon="info")
-        if confirmed:
-            installer_path = os.path.join(app_data_path, "NordWireConnectInstaller.exe")
-            download_progress = requests.download(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe", installer_path)
-            if download_progress.ok:
-                if config_data.get("auto_connect", True): 
-                    session_data["connected"] = False
-                    disconnect(only_disconnect=True)
-                else:
-                    disconnect()
-                    sess = os.path.join(app_data_path, "NordSessionData.json")
-                    if os.path.exists(sess): os.remove(sess)
+        if not confirmed: return
+        installer_path = os.path.join(app_data_path, "NordWireConnectInstaller.exe")
+        download_progress = requests.download(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe", installer_path)
+        if download_progress.ok:
+            if config_data.get("auto_connect", True): 
+                session_data["connected"] = False
+                disconnect(only_disconnect=True)
+            else:
+                disconnect()
+                sess = os.path.join(app_data_path, "NordSessionData.json")
+                if os.path.exists(sess): os.remove(sess)
+            res = system_class.run_sudo_cmd([installer_path])
+            if res > 32:
+                send_command("ui-closing", timeout=5)
                 if pystray_icon: pystray_icon.stop()
-                system_class.run_sudo_cmd([installer_path])
-            else: 
-                if os.path.exists(installer_path): os.remove(installer_path)
-                errorMessage("Unable to download NordWireConnectInstaller from GitHub!")
+                stop_app = True
+            else: warnMessage(f"Installer launch was canceled or failed (ShellExecuteW={res}).")
+        else: 
+            if os.path.exists(installer_path): os.remove(installer_path)
+            errorMessage("Unable to download NordWireConnectInstaller from GitHub!")
     except Exception as e: errorMessage(f"Unable to check for new updates due to an exception: {trace(e)}")
 def check_for_updates():
     try:

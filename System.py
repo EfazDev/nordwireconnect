@@ -109,43 +109,45 @@ class WindowsInterface(SystemInterface):
         )
         return decrypted_password_string.decode("utf-16-le")
     def get_shortcut_folder(self, name: str) -> str:
+        csidl = 0x0010 if name == "Desktop" else 0x0002
         try:
-            self._pythoncom.CoInitialize()
-            try:
-                p = self._win32com_client.Dispatch("WScript.Shell").SpecialFolders(name)
-                if p and os.path.isdir(p): return p
-            finally: self._pythoncom.CoUninitialize()
+            p = self._winshell.SHGetFolderPath(0, csidl, None, 0)
+            if p and os.path.isdir(p): return p
         except Exception: pass
         if name == "Desktop": return os.path.join(os.environ.get("USERPROFILE", ""), "Desktop")
         return os.path.join(os.getenv("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs")
     def setup_shortcuts(self, button: bool=False):
+        def _create_all(target_exe: str, icon_path: str, desktop_dir: str, programs_dir: str):
+            shell = self._win32com_client.Dispatch("WScript.Shell")
+            desk_short = shell.CreateShortcut(os.path.join(desktop_dir, "NordWireConnect.lnk"))
+            desk_short.TargetPath = target_exe
+            desk_short.IconLocation = icon_path
+            desk_short.Description = "Open NordWireConnect for VPN!"
+            desk_short.Save()
+            startm_short = shell.CreateShortcut(os.path.join(programs_dir, "NordWireConnect.lnk"))
+            startm_short.TargetPath = target_exe
+            startm_short.IconLocation = icon_path
+            startm_short.Description = "Open NordWireConnect for VPN!"
+            startm_short.Save()
         try:
+            installed_exe = os.path.join(self.app_install_path, "NordWireConnect.exe")
+            target_exe = installed_exe if os.path.exists(installed_exe) else os.path.abspath(sys.argv[0] or sys.executable)
+            icon_path = os.path.join(self.app_install_path, "Resources", "app_icon.ico")
+            desktop_dir = self.get_shortcut_folder("Desktop")
+            programs_dir = self.get_shortcut_folder("Programs")
             self._pythoncom.CoInitialize()
-            try:
-                shell = self._win32com_client.Dispatch("WScript.Shell")
-                installed_exe = os.path.join(self.app_install_path, "NordWireConnect.exe")
-                target_exe = installed_exe if os.path.exists(installed_exe) else os.path.abspath(sys.argv[0] or sys.executable)
-                icon_path = os.path.join(self.app_install_path, "Resources", "app_icon.ico")
-                desk_short = shell.CreateShortcut(os.path.join(self.get_shortcut_folder("Desktop"), "NordWireConnect.lnk"))
-                desk_short.TargetPath = target_exe
-                desk_short.IconLocation = icon_path
-                desk_short.Description = "Open NordWireConnect for VPN!"
-                desk_short.Save()
-                startm_short = shell.CreateShortcut(os.path.join(self.get_shortcut_folder("Programs"), "NordWireConnect.lnk"))
-                startm_short.TargetPath = target_exe
-                startm_short.IconLocation = icon_path
-                startm_short.Description = "Open NordWireConnect for VPN!"
-                startm_short.Save()
-                if button == True: successMessageBox(f"Successfully set up shortcuts for NordWireConnect!", "NordWireConnect")
+            try: _create_all(target_exe, icon_path, desktop_dir, programs_dir)
             finally: self._pythoncom.CoUninitialize()
+            if button == True: successMessageBox("Successfully set up shortcuts for NordWireConnect!", "NordWireConnect")
         except Exception as e: errorMessage(f"Unable to save shortcuts: {str(e)}")
     def run_sudo_cmd(self, cmd: list):
-        self._ctypes.windll.shell32.ShellExecuteW(
+        target_dir = os.path.dirname(os.path.abspath(cmd[0])) if cmd and os.path.exists(cmd[0]) else None
+        return self._ctypes.windll.shell32.ShellExecuteW(
             None,
             "runas",
             cmd[0],
             " ".join(cmd[1:]),
-            None,
+            target_dir,
             1
         )
     def run_sudo_cmd_with_code(self, cmd: list):
@@ -375,11 +377,11 @@ class WindowsInterface(SystemInterface):
         self._ctypes.windll.user32.DeleteMenu(hmenu, 0xF060, 0x0000)
     def enable_debug_console(self, title: str="NordWireConnect", on_streams_changed=None) -> bool:
         kernel32 = self._ctypes.windll.kernel32
-        if kernel32.GetConsoleWindow() != 0:
-            self._enable_ansi_on_console()
-            return False
-        if not kernel32.AllocConsole(): return False
-        self.console_allocated = True
+        allocated = False
+        if kernel32.GetConsoleWindow() == 0:
+            if not kernel32.AllocConsole(): return False
+            self.console_allocated = True
+            allocated = True
         kernel32.SetConsoleTitleW(title)
         self._disable_console_close_button()
         self._enable_ansi_on_console()
@@ -390,11 +392,12 @@ class WindowsInterface(SystemInterface):
         in_f = open("CONIN$", "r", encoding="utf-8")
         self.console_streams = [out_f, err_f, in_f]
         sys.stdout, sys.stderr, sys.stdin = out_f, err_f, in_f
+        sys.__stdout__, sys.__stderr__, sys.__stdin__ = out_f, err_f, in_f
         if on_streams_changed: on_streams_changed()
         for s in old_nulls:
             try: s.close()
             except Exception: pass
-        return True
+        return allocated
     def disable_debug_console(self, on_streams_changed=None) -> bool:
         if not self.console_allocated: return False
         old_streams = self.console_streams

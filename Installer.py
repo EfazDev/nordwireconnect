@@ -29,7 +29,7 @@ pre_program_files = os.getenv("ProgramFiles") or r"C:\Program Files"
 app_data_path = os.path.join(pip_class.getLocalAppData(), "NordWireConnect")
 program_files = os.path.join(pre_program_files, "NordWireConnect")
 cur_path = os.path.dirname(os.path.abspath(__file__))
-version = "1.3.5o"
+version = "1.3.5p"
 
 # Logging and Messages
 def systemMessage(message: str): terminal.print_ansi(message, PyKits.Terminal.hex_to_ansi("#3E5FFF"))
@@ -132,17 +132,16 @@ def install():
 
         # Create Service
         mainMessage("Creating NordWireConnect Service..")
-        subprocess.run(["sc", "delete", "NordWireConnectService"], capture_output=True, check=False, creationflags=no_win)
+        subprocess.run(["sc", "delete", "NordWireConnectService"], capture_output=True, check=False)
         subprocess.run(
             f"sc create NordWireConnectService binPath= \"{os.path.join(program_files, 'NordWireConnectService.exe')}\" start=auto",
             shell=True,
-            check=True,
-            creationflags=no_win
+            check=True
         )
 
         # Start Service
         mainMessage("Starting NordWireConnect Service..")
-        subprocess.run(["sc", "start", "NordWireConnectService"], capture_output=True, creationflags=no_win)
+        subprocess.run(["sc", "start", "NordWireConnectService"], capture_output=True)
 
         # Finalize and Setup Registry
         mainMessage("Setting up registry..")
