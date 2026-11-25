@@ -28,10 +28,10 @@ import servicemanager # type: ignore
 import win32serviceutil # type: ignore
 
 # Variables
-program_files = os.path.join(os.getenv("ProgramFiles"), "NordWireConnect")
+program_files = os.path.join(os.getenv("ProgramFiles") or r"C:\Program Files", "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
-wireguard_location = os.path.join(os.getenv("ProgramFiles"), "WireGuard")
-version = "1.3.5m"
+wireguard_location = os.path.join(os.getenv("ProgramFiles") or r"C:\Program Files", "WireGuard")
+version = "1.3.5n"
 windows_service = System.WindowsInterface()
 nord_socket = PyKits.Socket(port=61245)
 terminal = PyKits.Terminal()
@@ -40,9 +40,18 @@ safe_tunnel_re = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
 quiet_commands = {"wireguard-check", "tunnel-stats", "data-usage", "connection-status"}
 
 # Logging
-def info(message: str): servicemanager.LogInfoMsg(message); mainMessage(message)
-def error(message: str): servicemanager.LogErrorMsg(message); errorMessage(message)
-def warn(message: str): servicemanager.LogWarningMsg(message); warnMessage(message)
+def info(message: str):
+    try: servicemanager.LogInfoMsg(message)
+    except Exception: pass
+    mainMessage(message)
+def error(message: str):
+    try: servicemanager.LogErrorMsg(message)
+    except Exception: pass
+    errorMessage(message)
+def warn(message: str):
+    try: servicemanager.LogWarningMsg(message)
+    except Exception: pass
+    warnMessage(message)
 def systemMessage(message: str): terminal.print_ansi(message, PyKits.Terminal.hex_to_ansi("#3E5FFF"))
 def mainMessage(message: str): terminal.print_ansi(message, 15)
 def errorMessage(message: str, title: str="Uh oh!"): terminal.print_ansi(message, 9)
@@ -118,8 +127,10 @@ def get_tunnel_stats(tunnel_name: str="NordWireConnect") -> dict:
                     active = has_hs and (hs_age is not None and hs_age < 210.0)
                     return {"suc": True, "service_running": True, "active": active, "has_handshake": has_hs, "handshake_age": round(hs_age, 1) if hs_age is not None else None, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes}
     except Exception: pass
-    wg_check = windows_service.run_wireguard_command(["show", tunnel_name])
-    output = wg_check.stdout.strip().lower()
+    try:
+        wg_check = windows_service.run_wireguard_command(["show", tunnel_name])
+        output = wg_check.stdout.strip().lower()
+    except Exception: output = ""
     has_hs = ("latest handshake" in output) and ("latest handshake: never" not in output)
     return {"suc": True, "service_running": True, "active": has_hs, "has_handshake": has_hs, "handshake_age": 0.0 if has_hs else None, "rx_bytes": 0, "tx_bytes": 0}
 def extract_default_route_indexes(route_output: str) -> set[str]:

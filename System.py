@@ -70,6 +70,8 @@ class SystemInterface:
     def install_wireguard(self, send_command): raise NotImplementedError
     def needing_state(self): raise NotImplementedError
     def unneeding_state(self): raise NotImplementedError
+    def enable_debug_console(self, title: str="NordWireConnect", on_streams_changed=None): raise NotImplementedError
+    def disable_debug_console(self, on_streams_changed=None): raise NotImplementedError
 
 class WindowsInterface(SystemInterface):
     def __init__(self):
@@ -100,6 +102,9 @@ class WindowsInterface(SystemInterface):
         self._win32con = win32con
         self._winshell = winshell
         self._gzip = gzip
+        self.console_allocated = False
+        self.console_streams = []
+        self.null_streams = []
         self.app_install_path = os.path.join(self.program_files, "NordWireConnect")
         self.wireguard_exe = os.path.join(self.program_files, "WireGuard", "wireguard.exe")
         self.wg_exe = os.path.join(self.program_files, "WireGuard", "wg.exe")
@@ -112,6 +117,16 @@ class WindowsInterface(SystemInterface):
             self._binascii.unhexlify(encrypted), None, None, None, 0
         )
         return decrypted_password_string.decode("utf-16-le")
+    def get_shortcut_folder(self, name: str) -> str:
+        try:
+            self._pythoncom.CoInitialize()
+            try:
+                p = self._win32com_client.Dispatch("WScript.Shell").SpecialFolders(name)
+                if p and os.path.isdir(p): return p
+            finally: self._pythoncom.CoUninitialize()
+        except Exception: pass
+        if name == "Desktop": return os.path.join(os.environ.get("USERPROFILE", ""), "Desktop")
+        return os.path.join(os.getenv("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs")
     def setup_shortcuts(self, button: bool=False):
         try:
             self._pythoncom.CoInitialize()
@@ -120,14 +135,12 @@ class WindowsInterface(SystemInterface):
                 installed_exe = os.path.join(self.app_install_path, "NordWireConnect.exe")
                 target_exe = installed_exe if os.path.exists(installed_exe) else os.path.abspath(sys.argv[0] or sys.executable)
                 icon_path = os.path.join(self.app_install_path, "Resources", "app_icon.ico")
-                desk_shortpath = os.path.join(os.environ["USERPROFILE"], "Desktop", f"NordWireConnect.lnk")
-                desk_short = shell.CreateShortcut(desk_shortpath)
+                desk_short = shell.CreateShortcut(os.path.join(self.get_shortcut_folder("Desktop"), "NordWireConnect.lnk"))
                 desk_short.TargetPath = target_exe
                 desk_short.IconLocation = icon_path
                 desk_short.Description = "Open NordWireConnect for VPN!"
                 desk_short.Save()
-                startm_shortpath = os.path.join(os.getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", f"NordWireConnect.lnk")
-                startm_short = shell.CreateShortcut(startm_shortpath)
+                startm_short = shell.CreateShortcut(os.path.join(self.get_shortcut_folder("Programs"), "NordWireConnect.lnk"))
                 startm_short.TargetPath = target_exe
                 startm_short.IconLocation = icon_path
                 startm_short.Description = "Open NordWireConnect for VPN!"
@@ -278,18 +291,15 @@ class WindowsInterface(SystemInterface):
         return results
     def delete_shortcuts(self):
         try:
-            desk_shortpath = os.path.join(os.environ["USERPROFILE"], "Desktop", f"NordWireConnect.lnk")
-            if os.path.exists(desk_shortpath): os.remove(desk_shortpath)
-            startm_shortpath = os.path.join(os.getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", f"NordWireConnect.lnk")
-            if os.path.exists(startm_shortpath): os.remove(startm_shortpath)
+            for folder in ("Desktop", "Programs"):
+                p = os.path.join(self.get_shortcut_folder(folder), "NordWireConnect.lnk")
+                if os.path.exists(p): os.remove(p)
         except Exception as e: errorMessage(f"Unable to delete shortcuts: {str(e)}")
     def delete_registry(self):
-        try:
-            app_reg_path = "Software\\NordWireConnect"
-            self._win32api.RegDeleteKey(self._win32con.HKEY_LOCAL_MACHINE, app_reg_path)
-            registry_path = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\NordWireConnect"
-            self._win32api.RegDeleteKey(self._win32con.HKEY_LOCAL_MACHINE, registry_path)
-        except Exception as e: errorMessage(f"Unable to delete registry: {str(e)}")
+        for reg_path in ("Software\\NordWireConnect", r"Software\Microsoft\Windows\CurrentVersion\Uninstall\NordWireConnect"):
+            try: self._win32api.RegDeleteKey(self._win32con.HKEY_LOCAL_MACHINE, reg_path)
+            except Exception as e:
+                if getattr(e, "winerror", None) != 2 and getattr(e, "args", [None])[0] != 2: errorMessage(f"Unable to delete registry: {str(e)}")
     def relaunch_as_admin(self):
         is_compiled = bool(getattr(sys, "frozen", False) or "__compiled__" in globals())
         exe = os.path.abspath(sys.argv[0]) if is_compiled else sys.executable
@@ -357,6 +367,59 @@ class WindowsInterface(SystemInterface):
         else: return False
     def needing_state(self): self._ctypes.windll.kernel32.SetThreadExecutionState(0x80000001 | 0x00000040)
     def unneeding_state(self): self._ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+    def _enable_ansi_on_console(self):
+        kernel32 = self._ctypes.windll.kernel32
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+        for handle_id in (-11, -12):
+            handle = kernel32.GetStdHandle(handle_id)
+            if not handle or handle == -1: continue
+            mode = self._ctypes.c_uint32()
+            if not kernel32.GetConsoleMode(handle, self._ctypes.byref(mode)): continue
+            kernel32.SetConsoleMode(handle, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+    def _disable_console_close_button(self):
+        hwnd = self._ctypes.windll.kernel32.GetConsoleWindow()
+        if not hwnd: return
+        hmenu = self._ctypes.windll.user32.GetSystemMenu(hwnd, False)
+        if not hmenu: return
+        self._ctypes.windll.user32.DeleteMenu(hmenu, 0xF060, 0x0000)
+    def enable_debug_console(self, title: str="NordWireConnect", on_streams_changed=None) -> bool:
+        kernel32 = self._ctypes.windll.kernel32
+        if kernel32.GetConsoleWindow() != 0:
+            self._enable_ansi_on_console()
+            return False
+        if not kernel32.AllocConsole(): return False
+        self.console_allocated = True
+        kernel32.SetConsoleTitleW(title)
+        self._disable_console_close_button()
+        self._enable_ansi_on_console()
+        old_nulls = self.null_streams
+        self.null_streams = []
+        out_f = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+        err_f = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+        in_f = open("CONIN$", "r", encoding="utf-8")
+        self.console_streams = [out_f, err_f, in_f]
+        sys.stdout, sys.stderr, sys.stdin = out_f, err_f, in_f
+        if on_streams_changed: on_streams_changed()
+        for s in old_nulls:
+            try: s.close()
+            except Exception: pass
+        return True
+    def disable_debug_console(self, on_streams_changed=None) -> bool:
+        if not self.console_allocated: return False
+        old_streams = self.console_streams
+        self.console_streams = []
+        null_out = open(os.devnull, "w", encoding="utf-8")
+        null_err = open(os.devnull, "w", encoding="utf-8")
+        null_in = open(os.devnull, "r", encoding="utf-8")
+        self.null_streams = [null_out, null_err, null_in]
+        sys.stdout, sys.stderr, sys.stdin = null_out, null_err, null_in
+        if on_streams_changed: on_streams_changed()
+        for s in old_streams:
+            try: s.close()
+            except Exception: pass
+        self._ctypes.windll.kernel32.FreeConsole()
+        self.console_allocated = False
+        return True
 supported_systems = ["Windows"]
 not_supported_txt = "NordWireConnect is only supported on Windows and macOS."
 if platform.system() == "Windows": system = WindowsInterface()

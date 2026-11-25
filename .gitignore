@@ -1,12 +1,9 @@
 build
 dist
 UPX
-debug_flag
 Combined.bat
 QuickRebuild.bat
-QuickDebug.bat
 NordWireConnectInstaller.spec
-NordWireConnectDebugInstaller.spec
 Installer
 .DS_Store
 installer

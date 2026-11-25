@@ -2,16 +2,14 @@
 setlocal
 
 rem Build & Sign NordWireConnect (Nuitka Standalone)
-echo false> debug_flag
 if exist Installer rmdir /s /q Installer
 python -m nuitka ^
     --standalone ^
     --assume-yes-for-downloads ^
     --remove-output ^
     --enable-plugin=tk-inter ^
-    --windows-console-mode=disable ^
+    --windows-console-mode=attach ^
     --windows-icon-from-ico="Resources/app_icon.ico" ^
-    --include-data-files="debug_flag=debug_flag" ^
     --include-module=PyKits ^
     --include-module=System ^
     --include-module=Main ^

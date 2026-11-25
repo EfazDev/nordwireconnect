@@ -47,6 +47,7 @@ plan_timer = 0
 stat_count = 0
 since_connected = 0
 connect_monotonic_time = 0.0
+app_logger = None
 reconnect_queued = threading.Event()
 last_tunnel_rx = 0
 last_tunnel_tx = 0
@@ -97,7 +98,7 @@ base_config = {
     "check_for_updates": True,
     "data_encrypted": False,
     "beta_updates": False,
-    "debug_updates": False
+    "debug_mode": False
 }
 config_data = copy.deepcopy(base_config)
 config_data_type_allowed = {
@@ -135,7 +136,7 @@ config_data_type_allowed = {
     "data_encrypted": bool,
     "check_for_updates": bool,
     "beta_updates": bool,
-    "debug_updates": bool
+    "debug_mode": bool
 }
 session_data = {
     "connected": False,
@@ -151,13 +152,13 @@ full_files = False
 pystray_icon = None
 stop_app = False
 add_data_count = 0
-version = "1.3.5m"
+version = "1.3.5n"
 cached_asn_data = {"loaded": False, "names": [], "starts": [], "ends": []}
 service_pipe = r"\\.\pipe\NordWireConnect"
 tk_root = None
 Icon = pystray.Icon
 MenuItem = pystray.MenuItem
-server_filter = "&filters[servers.status]=online&fields[servers.id]&fields[servers.name]&fields[servers.hostname]&fields[servers.station]&fields[servers.status]&fields[servers.load]&fields[servers.created_at]&fields[servers.groups.id]&fields[servers.groups.title]&fields[servers.technologies.id]&fields[servers.technologies.metadata]&fields[servers.technologies.pivot.status]&fields[servers.specifications.identifier]&fields[servers.specifications.values.value]&fields[servers.locations.country.name]&fields[servers.locations.country.code]&fields[servers.locations.country.city.name]&fields[servers.locations.country.city.latitude]&fields[servers.locations.country.city.longitude]&fields[servers.locations.country.city.hub_score]&fields[servers.ips]"
+server_filter = "&filters[servers.status]=online&fields[servers.id]&fields[servers.name]&fields[servers.hostname]&fields[servers.station]&fields[servers.status]&fields[servers.load]&fields[servers.created_at]&fields[servers.groups.id]&fields[servers.groups.title]&fields[servers.technologies.id]&fields[servers.technologies.metadata]&fields[servers.technologies.pivot.status]&fields[servers.specifications.identifier]&fields[servers.specifications.values.value]&fields[servers.locations.country.id]&fields[servers.locations.country.name]&fields[servers.locations.country.code]&fields[servers.locations.country.city.id]&fields[servers.locations.country.city.name]&fields[servers.locations.country.city.latitude]&fields[servers.locations.country.city.longitude]&fields[servers.locations.country.city.hub_score]&fields[servers.ips]"
 
 # Logging and Messages
 def systemMessage(message: str): terminal.print_ansi(message, PyKits.Terminal.hex_to_ansi("#3E5FFF"))
@@ -191,9 +192,18 @@ def prune_old_logs(log_path: str, prefix: str, keep: int=15):
                 except Exception: pass
     except Exception: pass
 def write_json_atomic(path: str, data: typing.Any, indent: typing.Optional[int]=None):
-    tmp_path = f"{path}.{os.getpid()}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f: json.dump(data, f, indent=indent)
-    os.replace(tmp_path, path)
+    tmp_path = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f: json.dump(data, f, indent=indent)
+        for attempt in range(3):
+            try: os.replace(tmp_path, path); return
+            except PermissionError:
+                if attempt == 2: raise
+                time.sleep(0.03)
+    finally:
+        if os.path.exists(tmp_path):
+            try: os.remove(tmp_path)
+            except Exception: pass
 def parse_version_key(ver: str) -> tuple:
     if not ver: return ((0, 0, 0), 1, "")
     m = re.match(r"^\s*v?(\d+(?:\.\d+)*)([a-zA-Z0-9._\-]*)\s*$", str(ver))
@@ -219,8 +229,24 @@ def trace(e: Exception):
     exc_m = PyKits.Terminal.foreground(str(tb_v), color="Magenta", bright=False)
     lines.append(f"{exc_t} {exc_m}")
     return "\n".join(lines)
-def setup_logging():
+def _rebind_terminal_streams():
     global terminal
+    if not app_logger: return
+    terminal = PyKits.Terminal(logger=app_logger, log_level=logging.INFO)
+    err_terminal = PyKits.Terminal(logger=app_logger, log_level=logging.ERROR)
+    terminal.inject_stdout()
+    err_terminal.inject_stderr()
+def read_early_debug_mode() -> bool:
+    if "--debug" in sys.argv or os.environ.get("NWC_DEBUG") == "1": return True
+    config_path = os.path.join(app_data_path, "ConnectConfig.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f: data = json.load(f)
+            return bool(data.get("debug_mode", False))
+        except Exception: pass
+    return False
+def setup_logging():
+    global terminal, app_logger
     handler_name = "Main"
     log_path = os.path.join(app_data_path, "Logs")
     if not os.path.exists(log_path): os.makedirs(log_path, mode=511)
@@ -235,10 +261,8 @@ def setup_logging():
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
     logger.addHandler(file_handler)
-    terminal = PyKits.Terminal(logger=logger, log_level=logging.INFO)
-    err_terminal = PyKits.Terminal(logger=logger, log_level=logging.ERROR)
-    terminal.inject_stdout()
-    err_terminal.inject_stderr()
+    app_logger = logger
+    _rebind_terminal_streams()
     System.systemMessage = systemMessage
     System.mainMessage = mainMessage
     System.successMessage = successMessage
@@ -293,18 +317,37 @@ def center_tkinter_window(window: tk.Toplevel):
     x = (window.winfo_screenwidth() // 2) - (window.winfo_width() // 2)
     y = (window.winfo_screenheight() // 2) - (window.winfo_height() // 2)
     window.geometry(f"+{x}+{y}")
+def apply_window_icon(win: tk.Misc, default: bool=False):
+    for base in (program_files, os.path.dirname(os.path.abspath(__file__))):
+        p = os.path.join(base, "Resources", "app_icon.png")
+        if os.path.exists(p):
+            try:
+                img = tk.PhotoImage(file=p)
+                win._icon_img = img
+                win.iconphoto(default, img)
+                return
+            except Exception: pass
+def get_server_location(server: dict) -> tuple[str, str]:
+    if not isinstance(server, dict): return "", ""
+    locs = server.get("locations")
+    loc = locs[0] if isinstance(locs, list) and locs and isinstance(locs[0], dict) else {}
+    country_obj = loc.get("country") if isinstance(loc.get("country"), dict) else {}
+    city_obj = country_obj.get("city") if isinstance(country_obj.get("city"), dict) else {}
+    country_name = country_obj.get("name") or ""
+    city_name = city_obj.get("name") or country_name
+    return country_name, city_name
 def encrypt_data(key_name: str, data: str) -> str: return system_class.encrypt_data(key_name, data)
 def decode_data(key_name: str, encrypted: str) -> str: return system_class.decrypt_data(key_name, encrypted)
 def select_server_list(message: str="Please select a server!", servers: list=None) -> typing.Union[None, dict]:
     if servers is None and check_asn_server_list() and not cached_asn_data["loaded"]: ensure_asn_loaded()
     if not os.path.exists(os.path.join(app_data_path, "NordServerCache.json")): return
-    with open(os.path.join(app_data_path, "NordServerCache.json"), "r") as f: raw_servers = json.load(f)
+    with open(os.path.join(app_data_path, "NordServerCache.json"), "r", encoding="utf-8") as f: raw_servers = json.load(f)
     if servers == None:
         server_dictionary = {
             "Auto": [("Auto", "auto", None)]
         }
         for s in raw_servers:
-            if s["status"] != "online" or s["load"] == 0: continue
+            if s.get("status") != "online" or s.get("load", 0) == 0: continue
             virutal_location = get_if_virtual_location(s)
             wireguard_metadata = None
             for m in s.get("technologies", []):
@@ -312,8 +355,8 @@ def select_server_list(message: str="Please select a server!", servers: list=Non
                     wireguard_metadata = m.get("metadata", {})
                     break
             if not wireguard_metadata: continue
-            country_name = s["locations"][0]["country"]["name"]
-            city_name = s["locations"][0]["country"]["city"]["name"]
+            country_name, city_name = get_server_location(s)
+            if not country_name: continue
             city_with_virtual_text = city_name + (" - Virtual" if virutal_location else "")
             server_name = s["name"]
             if country_name not in server_dictionary:
@@ -348,7 +391,7 @@ def select_server_list(message: str="Please select a server!", servers: list=Non
     win.resizable(False, False)
     win.attributes("-topmost", True)
     center_tkinter_window(win)
-    win.iconphoto(False, tk.PhotoImage(file=os.path.join(program_files, "Resources", "app_icon.png")))
+    apply_window_icon(win, False)
     selected = {
         "title": None,
         "tunnel_id": None,
@@ -432,17 +475,19 @@ def connect_history_server_button():
     generated_servers = {}
     if not config_data.get("server_history"): config_data["server_history"] = []
     for s in config_data.get("server_history", []):
+        if not isinstance(s, dict): continue
         country = s.get("country")
         city = s.get("city")
         server_name = s.get("name")
         date = s.get("time")
-        dt = datetime.datetime.fromtimestamp(date).astimezone()
-        if not country or not city or not server_name: continue
+        if not country or not city or not server_name or not isinstance(date, (int, float)): continue
+        try: dt = datetime.datetime.fromtimestamp(date).astimezone()
+        except Exception: continue
         day = convert_to_local(dt).strftime("%Y-%m-%d")
-        time = convert_to_local(dt).strftime("%H:%M")
+        hm = convert_to_local(dt).strftime("%H:%M")
         if day not in generated_servers: generated_servers[day] = {}
-        if time not in generated_servers[day]: generated_servers[day][time] = []
-        generated_servers[day][time].insert(0, (f"{server_name} ({city}, {country})", server_name.replace(" ", "").replace("#", ""), "server"))
+        if hm not in generated_servers[day]: generated_servers[day][hm] = []
+        generated_servers[day][hm].insert(0, (f"{server_name} ({city}, {country})", server_name.replace(" ", "").replace("#", ""), "server"))
     selected_server = select_server_list("Please select a server from history to connect to!", servers=generated_servers)
     if not selected_server: return
     addToThread(connect_server, (selected_server["tunnel_id"], selected_server["exact_mode"]), connection=True)
@@ -485,16 +530,16 @@ def get_latest_version() -> typing.Union[dict, None]:
     try:
         if tunnel_check(timeout=1):
             latest_version = requests.get("https://raw.githubusercontent.com/EfazDev/nordwireconnect/refs/heads/main/Version.json")
-            if latest_version.ok: 
+            if latest_version.ok and isinstance(latest_version.json, dict):
                 res = latest_version.json
                 for v in res.get("versions", []):
-                    if v.get("version") and v.get("beta", False) == config_data.get("beta_updates", False) and v.get("debug", False) == config_data.get("debug_updates", False): return v
+                    if isinstance(v, dict) and v.get("version") and v.get("beta", False) == config_data.get("beta_updates", False): return v
     except Exception as e: errorMessage(f"Error while trying to check for updates: {trace(e)}")
 def get_latest_wireguard_version() -> dict:
     try:
         if tunnel_check(timeout=1):
             latest_version = requests.get("https://build.wireguard.com/distros.json")
-            if latest_version.ok: 
+            if latest_version.ok and isinstance(latest_version.json, dict):
                 res = latest_version.json
                 return system_class.format_for_latest_wireguard(res)
     except Exception as e: errorMessage(f"Error while trying to check for updates: {trace(e)}")
@@ -531,7 +576,7 @@ def tkinter_install_updates(latest_ver: str):
         confirmed = messagebox.askyesno("Update Available!", f"NordWireConnect v{latest_ver} is now available to be downloaded from GitHub!\nDo you wish to proceed?", icon="info")
         if confirmed:
             installer_path = os.path.join(app_data_path, "NordWireConnectInstaller.exe")
-            download_progress = requests.download(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/{'NordWireConnectDebugInstaller.exe' if config_data.get('debug_updates', False) else 'NordWireConnectInstaller.exe'}", installer_path)
+            download_progress = requests.download(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe", installer_path)
             if download_progress.ok:
                 if config_data.get("auto_connect", True): 
                     session_data["connected"] = False
@@ -554,7 +599,7 @@ def check_for_updates():
             return
         if is_newer_version(latest_version["version"], version) or debug_mode != latest_version.get("debug", False): 
             latest_ver = latest_version["version"]
-            test_available = requests.head(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/{'NordWireConnectDebugInstaller.exe' if config_data.get('debug_updates', False) else 'NordWireConnectInstaller.exe'}")
+            test_available = requests.head(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe")
             if not test_available.ok: 
                 errorMessage("I'm sorry! The latest version is currently unavailable to be downloaded. Please check back later!")
                 return
@@ -643,21 +688,23 @@ def get_vpn_renewal_data() -> dict:
             if not config_data.get("access_token", ""): return {"active": False, "expires_at": None, "raw_expiry": "0000-00-00 00:00:00"}
             decrypted_token = decode_data("access_token", config_data.get("access_token", ""))
             service_data = requests.get(f"https://api.nordvpn.com/v1/users/services", auth=["token", decrypted_token])
-            if service_data.ok:
+            if service_data.ok and isinstance(service_data.json, list):
                 for s in service_data.json:
-                    if s.get("service", {}).get("identifier") == "vpn":
-                        expiry = convert_nordtime_to_datetime(s.get("expires_at", "0000-00-00 00:00:00"))
+                    if isinstance(s, dict) and isinstance(s.get("service"), dict) and s["service"].get("identifier") == "vpn":
+                        raw_exp = s.get("expires_at") or "0000-00-00 00:00:00"
+                        expiry = convert_nordtime_to_datetime(raw_exp)
                         if expiry:
                             return {
                                 "active": True,
                                 "expires_at": expiry,
-                                "raw_expiry": s.get("expires_at", "0000-00-00 00:00:00")
+                                "raw_expiry": raw_exp
                             }
     except Exception as e: errorMessage(f"Unable to get VPN plan renewal data: {trace(e)}")
     return {"active": False, "expires_at": None, "raw_expiry": "0000-00-00 00:00:00"}
 def get_if_within_reminder_period(expiry) -> typing.Union[int, None]:
-    cur_time = get_current_time()
-    diff = convert_nordtime_to_datetime(expiry) - cur_time
+    exp_dt = convert_nordtime_to_datetime(expiry)
+    if not exp_dt: return -1
+    diff = exp_dt - get_current_time()
     if diff.days <= 1 and config_data.get("plan_reminder_level", 5) == 6: return 6
     elif diff.days <= 3 and config_data.get("plan_reminder_level", 5) == 5: return 5
     elif diff.days <= 7 and config_data.get("plan_reminder_level", 5) == 4: return 4
@@ -737,7 +784,10 @@ def session_data_modified():
     try: write_json_atomic(os.path.join(app_data_path, "NordSessionData.json"), session_data, indent=4)
     except Exception: pass
 @functools.lru_cache(maxsize=8)
-def convert_nordtime_to_datetime(time_str: str) -> datetime.datetime: return datetime.datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+def convert_nordtime_to_datetime(time_str: str) -> typing.Optional[datetime.datetime]:
+    if not time_str or not isinstance(time_str, str) or time_str.startswith("0000-"): return None
+    try: return datetime.datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+    except Exception: return None
 def ensure_asn_loaded(force: bool=False):
     with asn_lock:
         if cached_asn_data["loaded"] and not force: return
@@ -799,9 +849,15 @@ def run_cache(force: bool=False):
             else: return
         for s in raw_all_servers:
             for l in s.get("locations", []):
-                c = l["country"]["city"]
-                all_cities[c["id"]] = c["name"]
-            all_servers_by_id[s["name"].replace(" ", "").replace("#", "")] = s["id"]
+                country = l.get("country") if isinstance(l, dict) else None
+                c = country.get("city") if isinstance(country, dict) else None
+                if isinstance(c, dict) and "id" in c and "name" in c: all_cities[c["id"]] = c["name"]
+            if "id" in s and "name" in s: all_servers_by_id[s["name"].replace(" ", "").replace("#", "")] = s["id"]
+        if not all_cities:
+            for country in all_countries:
+                if not isinstance(country, dict): continue
+                for c in country.get("cities") or []:
+                    if isinstance(c, dict) and "id" in c and "name" in c: all_cities[c["id"]] = c["name"]
         all_cities_list = [{"id": i, "name": n} for i, n in all_cities.items()]
         write_json_atomic(server_cache_path, raw_servers)
         write_json_atomic(country_cache_path, all_countries)
@@ -870,9 +926,9 @@ def change_access_token():
     inputted = inputted.strip()
     if len(inputted) > 50:
         test_request = requests.get("https://api.nordvpn.com/v1/users/services/credentials", auth=["token", inputted], timeout=12)
-        if test_request.ok:
+        if test_request.ok and isinstance(test_request.json, dict):
             test_request2 = requests.get("https://api.nordvpn.com/v1/users/current", auth=["token", inputted], timeout=12)
-            if test_request2.ok:
+            if test_request2.ok and isinstance(test_request2.json, dict):
                 test_request = test_request.json
                 test_request2 = test_request2.json
                 config_data["openvpn_username"] = encrypt_data("openvpn_username", test_request.get("username", ""))
@@ -971,7 +1027,7 @@ def add_data_usage_to_history(download: int, upload: int):
     if not config_data.get("total_data_usage"): config_data["total_data_usage"] = {"upload": 0, "download": 0}
     usage = config_data["monthly_data_usage"]
     total_usage = config_data["total_data_usage"]
-    if usage["month"] != cur_date.month or usage["year"] != cur_date.year: config_data["monthly_data_usage"] = {"month": cur_date.month, "year": cur_date.year, "upload": 0, "download": 0}
+    if usage.get("month") != cur_date.month or usage.get("year") != cur_date.year: usage = {"month": cur_date.month, "year": cur_date.year, "upload": 0, "download": 0}
     usage["upload"] += upload
     usage["download"] += download
     config_data["monthly_data_usage"] = usage
@@ -1071,11 +1127,20 @@ def change_beta_updates():
     save_configuration()
     update_tray()
 def check_beta_updates(): return config_data.get("beta_updates", False) == True
-def change_debug_updates():
-    config_data["debug_updates"] = not config_data.get("debug_updates", False)
+def change_debug_mode():
+    global debug_mode
+    enabled = not debug_mode
+    config_data["debug_mode"] = enabled
+    debug_mode = enabled
     save_configuration()
+    if enabled:
+        system_class.enable_debug_console(f"NordWireConnect v{version} - Debugging", on_streams_changed=_rebind_terminal_streams)
+        warnMessage("Debug Mode enabled (disable from tray menu to close console).")
+    else:
+        warnMessage("Debug Mode disabled.")
+        system_class.disable_debug_console(on_streams_changed=_rebind_terminal_streams)
     update_tray()
-def check_debug_updates(): return config_data.get("debug_updates", False) == True
+def check_debug_mode(): return bool(debug_mode)
 def change_track_servers():
     config_data["track_servers"] = not config_data.get("track_servers", False)
     save_configuration()
@@ -1132,7 +1197,7 @@ def differ_from_status_action2():
     addToThread(pre_connect, (), connection=True)
 def differ_to_status(): return session_data["connection_text"]
 def differ_to_city() -> str:
-    if session_data["connected"] == True: return f"City: {session_data['server']['locations'][0]['country']['city']['name']}"
+    if session_data["connected"] == True and session_data.get("server"): return f"City: {get_server_location(session_data['server'])[1] or 'N/A'}"
     else: return "City: N/A"
 def differ_to_ip_add() -> str: 
     if session_data["connected"] == True: return f"IP Address: {session_data['server']['station']}"
@@ -1181,12 +1246,14 @@ def differ_to_renewal_active() -> str:
 def differ_to_renewal_date() -> str:
     if config_data.get("plan_renewal_data", {}).get("active") and config_data["plan_renewal_data"].get("expiry"):
         expiry_date = convert_nordtime_to_datetime(config_data["plan_renewal_data"]["expiry"])
+        if not expiry_date: return "Plan Renewal Date: N/A"
         return f"Plan Renewal Date: {expiry_date.astimezone().strftime('%a %B %d, %Y at %H:%M:%S')}"
     else: return "Plan Renewal Date: N/A"
 def differ_to_renewal_remaining() -> str:
     if config_data.get("plan_renewal_data", {}).get("active") and config_data["plan_renewal_data"].get("expiry"):
         current_date = get_current_time()
         expiry_date = convert_nordtime_to_datetime(config_data["plan_renewal_data"]["expiry"])
+        if not expiry_date: return "Plan Renewal Remaining: N/A"
         time_diff = expiry_date - current_date
         str_list = []
         if time_diff.days > 0: str_list.append(f"{time_diff.days} days")
@@ -1403,7 +1470,7 @@ def connect(exact_mode: str=None):
                 return
             resp = fetch_server_recommendations(f"https://api.nordvpn.com/v1/servers/recommendations?{server_filter}&filters[country_id]={country_id}&filters[servers_technologies][identifier]=wireguard_udp&limit=100")
             if resp.ok and isinstance(resp.json, list): all_server_recommendations = resp.json
-            else: all_server_recommendations = [s for s in load_cached_servers() if s.get("locations") and s["locations"][0]["country"]["name"] == config_data["server"]][:100]
+            else: all_server_recommendations = [s for s in load_cached_servers() if get_server_location(s)[0] == config_data["server"]][:100]
             if not all_server_recommendations:
                 errorMessage("Unable to get NordVPN server recommendations.")
                 mark_not_connected()
@@ -1431,7 +1498,7 @@ def connect(exact_mode: str=None):
                 return
             resp = fetch_server_recommendations(f"https://api.nordvpn.com/v1/servers/recommendations?{server_filter}&filters[country_city_id]={city_id}&filters[servers_technologies][identifier]=wireguard_udp&limit=100")
             if resp.ok and isinstance(resp.json, list): all_server_recommendations = resp.json
-            else: all_server_recommendations = [s for s in load_cached_servers() if s.get("locations") and s["locations"][0]["country"]["city"]["name"] == config_data["server"]][:100]
+            else: all_server_recommendations = [s for s in load_cached_servers() if get_server_location(s)[1] == config_data["server"]][:100]
             if not all_server_recommendations:
                 errorMessage("Unable to get NordVPN server recommendations.")
                 mark_not_connected()
@@ -1466,7 +1533,7 @@ def connect(exact_mode: str=None):
                 set_icon("error.ico")
                 return
             req = fetch_server_recommendations(f"https://api.nordvpn.com/v1/servers/recommendations?{server_filter}&filters[country_city_id]={city_id}&filters[servers_technologies][identifier]=wireguard_udp&limit=5000", timeout=15)
-            city_servers = req.json if (req.ok and isinstance(req.json, list)) else [s for s in load_cached_servers() if s.get("locations") and s["locations"][0]["country"]["city"]["name"] == city_name]
+            city_servers = req.json if (req.ok and isinstance(req.json, list)) else [s for s in load_cached_servers() if get_server_location(s)[1] == city_name]
             all_server_recommendations = []
             for server in city_servers:
                 if len(all_server_recommendations) >= 100: break
@@ -1545,9 +1612,11 @@ def connect(exact_mode: str=None):
         keepalive_val = config_data.get("persistent_keepalive", 25)
         for s in all_server_recommendations:
             if attempts >= max_attempts: break
+            if not s.get("name"): continue
             shortened_name = s["name"].replace(" ", "").replace("#", "")
-            country_name = s["locations"][0]["country"]["name"].replace(" ", "")
-            city_name = s["locations"][0]["country"]["city"]["name"].replace(" ", "")
+            raw_country, raw_city = get_server_location(s)
+            country_name = raw_country.replace(" ", "")
+            city_name = raw_city.replace(" ", "")
             if target_server_cfg not in ("auto", None):
                 matched = shortened_name == target_norm or city_name == target_norm or country_name == target_norm or (asn_city_norm is not None and city_name == asn_city_norm)
                 if not matched: continue
@@ -1588,9 +1657,10 @@ def connect(exact_mode: str=None):
             connect_monotonic_time = time.monotonic()
             last_tunnel_rx = int(connected_stats.get("rx_bytes", 0))
             last_tunnel_tx = int(connected_stats.get("tx_bytes", 0))
+            conn_country, conn_city = get_server_location(connected_server)
             successMessage(f"Successfully connected to server: {connected_server['name']}!")
             successMessage(f"Load: {connected_server['load']}%")
-            successMessage(f"City: {connected_server['locations'][0]['country']['city']['name']}")
+            successMessage(f"City: {conn_city or 'N/A'}")
             successMessage(f"IP Address: {connected_server['station']}")
             successMessage(f"Hostname: {connected_server['hostname']}")
             session_data["connected"] = True
@@ -1604,8 +1674,8 @@ def connect(exact_mode: str=None):
             session_data["org_server_id"] = config_data["server"]
             session_data_modified()
             add_server_to_history({
-                "city": connected_server["locations"][0]["country"]["city"]["name"],
-                "country": connected_server["locations"][0]["country"]["name"],
+                "city": conn_city or "N/A",
+                "country": conn_country or "N/A",
                 "time": get_current_time().timestamp(),
                 "name": connected_server["name"],
             })
@@ -1653,8 +1723,8 @@ def update_ui_timer():
     try:
         if session_data.get("connected") == True and session_data.get("server"):
             if connect_monotonic_time > 0: session_data["session_time"] = max(0, int(time.monotonic() - connect_monotonic_time))
-            srv_name = session_data["server"]["name"]
-            city_name = session_data["server"]["locations"][0]["country"]["city"]["name"]
+            srv_name = session_data["server"].get("name", "Unknown")
+            city_name = get_server_location(session_data["server"])[1] or "N/A"
             if pystray_icon: pystray_icon.title = f"NordWireConnect v{version}\nConnected to {srv_name}!\nCity: {city_name}\nSession Time: {format_seconds(session_data['session_time'])}"
             sig = (True, srv_name, session_data.get("current_load"), session_data.get("download_data_usage"), session_data.get("upload_data_usage"), session_data["session_time"] // 5)
             if sig != last_tray_signature:
@@ -1760,6 +1830,8 @@ def app():
     global debug_mode
     global tk_root
     os.makedirs(app_data_path, exist_ok=True)
+    debug_mode = read_early_debug_mode()
+    if debug_mode: system_class.enable_debug_console(f"NordWireConnect v{version} - Debugging")
     setup_logging()
     systemMessage(f"{'-'*5:^5} NordWireConnect v{version} {'-'*5:^5}")
 
@@ -1768,15 +1840,7 @@ def app():
     tk_root = tk.Tk()
     tk_root.withdraw()
 
-    # Check Debugging Mode
-    try:
-        debug_mode = False
-        for candidate_dir in (os.path.dirname(os.path.abspath(__file__)), os.path.dirname(os.path.abspath(sys.argv[0] or sys.executable)), program_files):
-            flag_path = os.path.join(candidate_dir, "debug_flag")
-            if os.path.exists(flag_path):
-                with open(flag_path, "r", encoding="utf-8") as f: debug_mode = f.read().strip().lower() == "true"
-                break
-    except Exception: debug_mode = False
+    # Debug Message
     if debug_mode: warnMessage("Debug Mode is enabled and console window should be visible if you can see this!")
 
     # Only for Windows
@@ -1943,7 +2007,7 @@ def app():
                         pystray.MenuItem("Add ASNs to Server List", unicon(change_asn_server_list), checked=unicon(check_asn_server_list), radio=True),
                         pystray.MenuItem("Auto Check for Updates", unicon(change_autoupdates), checked=unicon(check_autoupdates), radio=True),
                         pystray.MenuItem("Beta Updates", unicon(change_beta_updates), checked=unicon(check_beta_updates), radio=True),
-                        pystray.MenuItem("Debug Mode", unicon(change_debug_updates), checked=unicon(check_debug_updates), radio=True),
+                        pystray.MenuItem("Debug Mode", unicon(change_debug_mode), checked=unicon(check_debug_mode), radio=True),
                         pystray.MenuItem("Track Servers Connected", unicon(change_track_servers), checked=unicon(check_track_servers), radio=True),
                     )),
                     pystray.MenuItem("Tools", pystray.Menu(
@@ -1977,7 +2041,7 @@ def app():
         tk_root.after(0, update_ui_timer)
         if config_data.get("check_for_updates", True) == True: threading.Thread(target=auto_check_for_updates, daemon=True).start()
         tk_root.after(100, check_stop_flag)
-        tk_root.iconphoto(True, tk.PhotoImage(file=os.path.join(program_files, "Resources", "app_icon.png"))) 
+        apply_window_icon(tk_root, True)
         tk_root.after(50, poll_ui_queue)
         pystray_icon.run_detached(unicon(setup))
         tk.mainloop()

@@ -36,16 +36,11 @@ jobs:
             - name: Build stable (Rebuild.bat)
               shell: cmd
               run: call Rebuild.bat
-            - name: Build debug (Debug.bat)
-              shell: cmd
-              run: call Debug.bat
-            - name: Upload installers
-              uses: actions/upload-artifact@v4
+            - name: Upload installer
+              uses: actions/upload-artifact@v7
               with:
-                name: NordWireConnect
-                path: |
-                  dist/NordWireConnectInstaller.exe
-                  dist/NordWireConnectDebugInstaller.exe
+                path: dist/NordWireConnectInstaller.exe
+                archive: false
                 if-no-files-found: error
             - name: Upload crash report on failure
               if: failure()

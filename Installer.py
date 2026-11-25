@@ -25,11 +25,11 @@ import subprocess
 pip_class = PyKits.pip()
 terminal = PyKits.Terminal()
 main_os = platform.system()
-pre_program_files = os.getenv("ProgramFiles")
+pre_program_files = os.getenv("ProgramFiles") or r"C:\Program Files"
 app_data_path = os.path.join(pip_class.getLocalAppData(), "NordWireConnect")
 program_files = os.path.join(pre_program_files, "NordWireConnect")
 cur_path = os.path.dirname(os.path.abspath(__file__))
-version = "1.3.5m"
+version = "1.3.5n"
 
 # Logging and Messages
 def systemMessage(message: str): terminal.print_ansi(message, PyKits.Terminal.hex_to_ansi("#3E5FFF"))
