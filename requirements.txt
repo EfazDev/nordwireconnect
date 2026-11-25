@@ -1,0 +1,7 @@
+nuitka 
+ordered-set 
+zstandard 
+pystray 
+pillow 
+pywin32 
+truststore
