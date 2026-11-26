@@ -184,7 +184,7 @@ full_files = False
 pystray_icon = None
 stop_app = False
 add_data_count = 0
-version = "1.5.0r"
+version = "1.5.0s"
 current_icon_name = "app_icon.ico"
 tray_ready = threading.Event()
 icon_lock = threading.Lock()
@@ -696,7 +696,7 @@ def check_for_updates():
         if not latest_version:
             errorMessage("Unable to check for new updates! Check your internet connection..")
             return
-        if is_newer_version(latest_version["version"], version) or debug_mode != latest_version.get("debug", False): 
+        if is_newer_version(latest_version["version"], version): 
             latest_ver = latest_version["version"]
             test_available = requests.head(f"https://github.com/EfazDev/nordwireconnect/releases/download/v{latest_ver}/NordWireConnectInstaller.exe")
             if not test_available.ok: 

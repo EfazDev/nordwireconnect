@@ -33,7 +33,7 @@ import win32serviceutil # type: ignore
 program_files = os.path.join(os.getenv("ProgramFiles") or r"C:\Program Files", "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles") or r"C:\Program Files", "WireGuard")
-version = "1.5.0r"
+version = "1.5.0s"
 windows_service = System.WindowsInterface()
 nord_socket = PyKits.Socket(port=61245)
 terminal = PyKits.Terminal()
