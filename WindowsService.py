@@ -10,12 +10,14 @@ import os
 import re
 import sys
 import time
+import winreg
 import PyKits
 import System
 import logging
 import win32ts # type: ignore
 import win32api # type: ignore
 import datetime
+import ipaddress
 import win32con # type: ignore
 import subprocess
 import win32event # type: ignore
@@ -31,13 +33,17 @@ import win32serviceutil # type: ignore
 program_files = os.path.join(os.getenv("ProgramFiles") or r"C:\Program Files", "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles") or r"C:\Program Files", "WireGuard")
-version = "1.3.5q"
+version = "1.5.0r"
 windows_service = System.WindowsInterface()
 nord_socket = PyKits.Socket(port=61245)
 terminal = PyKits.Terminal()
 pip_class = PyKits.pip()
 safe_tunnel_re = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
 quiet_commands = {"wireguard-check", "tunnel-stats", "data-usage", "connection-status"}
+ipv6_reject_rule_name = "NordWireConnect_InstantRejectIPv6"
+nrpt_reg_path = r"SYSTEM\CurrentControlSet\Services\Dnscache\Parameters\DnsPolicyConfig\NordWireConnect"
+default_ipv6_reject_split = "1::/16,2::/15,4::/14,8::/13,10::/12,20::/11,40::/10,80::/9,100::/8,200::/7,400::/6,800::/5,1000::/4,2000::/3,4000::/2,8000::/2,c000::/3,e000::/4,f000::/5,f800::/6,fe00::/9,fec0::/10"
+default_ipv6_reject_full = default_ipv6_reject_split + ",fc00::/7"
 
 # Logging
 def info(message: str):
@@ -166,6 +172,82 @@ def wait_for_service(name: str, timeout: int=15, status: int=win32service.SERVIC
         if windows_service.get_service_state(name) == status: return True
         time.sleep(0.2)
     return windows_service.get_service_state(name) == status
+def sanitize_ipv6_cidrs(raw_cidrs: str, split_lan: bool=False) -> str:
+    valid = []
+    if isinstance(raw_cidrs, str) and raw_cidrs.strip():
+        for tok in raw_cidrs.split(","):
+            t = tok.strip()
+            if not t: continue
+            try:
+                net = ipaddress.ip_network(t, strict=False)
+                if net.version == 6 and net.prefixlen >= 1: valid.append(str(net))
+            except Exception: pass
+    if valid: return ",".join(valid)
+    return default_ipv6_reject_split if split_lan else default_ipv6_reject_full
+def sanitize_nrpt_dns_servers(raw_dns: str) -> str:
+    valid = []
+    if isinstance(raw_dns, str) and raw_dns.strip():
+        for tok in re.split(r"[,;]", raw_dns):
+            t = tok.strip()
+            if not t: continue
+            try:
+                ip_str = str(ipaddress.ip_address(t))
+                if ip_str not in valid: valid.append(ip_str)
+            except Exception: pass
+    return ";".join(valid)
+def set_nrpt_dns_lock(enabled: bool, raw_dns: str=None, flush_dns: bool=True) -> bool:
+    ok = True
+    if enabled:
+        servers = sanitize_nrpt_dns_servers(raw_dns)
+        if servers:
+            try:
+                with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, nrpt_reg_path, 0, winreg.KEY_SET_VALUE) as k:
+                    winreg.SetValueEx(k, "Version", 0, winreg.REG_DWORD, 2)
+                    winreg.SetValueEx(k, "ConfigOptions", 0, winreg.REG_DWORD, 8)
+                    winreg.SetValueEx(k, "Name", 0, winreg.REG_MULTI_SZ, ["."])
+                    winreg.SetValueEx(k, "GenericDNSServers", 0, winreg.REG_SZ, servers)
+            except Exception: ok = False
+        else:
+            ok = False
+            try: winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, nrpt_reg_path)
+            except OSError: pass
+    else:
+        try: winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, nrpt_reg_path)
+        except OSError: pass
+    if flush_dns:
+        try: System.shell_run(["ipconfig", "/flushdns"], timeout=5)
+        except Exception: pass
+    return ok
+def set_ipv6_instant_reject(enabled: bool, split_lan: bool=False, raw_cidrs: str=None, flush_dns: bool=True) -> bool:
+    try: System.shell_run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={ipv6_reject_rule_name}"], timeout=6)
+    except Exception: pass
+    ok = True
+    if enabled:
+        remote_ips = sanitize_ipv6_cidrs(raw_cidrs, split_lan=split_lan)
+        try:
+            res = System.shell_run(["netsh", "advfirewall", "firewall", "add", "rule", f"name={ipv6_reject_rule_name}", "dir=out", "action=block", "enable=yes", "profile=any", f"remoteip={remote_ips}"], timeout=8)
+            ok = res.returncode == 0
+        except Exception: ok = False
+        try:
+            pp = System.shell_run(["netsh", "interface", "ipv6", "set", "prefixpolicy", "::ffff:0:0/96", "45", "4"], timeout=6)
+            if pp.returncode != 0: System.shell_run(["netsh", "interface", "ipv6", "add", "prefixpolicy", "::ffff:0:0/96", "45", "4"], timeout=6)
+        except Exception: pass
+    else:
+        try:
+            pp = System.shell_run(["netsh", "interface", "ipv6", "set", "prefixpolicy", "::ffff:0:0/96", "35", "4"], timeout=6)
+            if pp.returncode != 0: System.shell_run(["netsh", "interface", "ipv6", "add", "prefixpolicy", "::ffff:0:0/96", "35", "4"], timeout=6)
+        except Exception: pass
+    if flush_dns:
+        try: System.shell_run(["ipconfig", "/flushdns"], timeout=5)
+        except Exception: pass
+    return ok
+def set_tunnel_mtu(mtu_val: int, tunnel_name: str="NordWireConnect") -> bool:
+    if not isinstance(mtu_val, int) or isinstance(mtu_val, bool) or not (1280 <= mtu_val <= 1500): return False
+    t_name = sanitize_tunnel_name(tunnel_name)
+    try:
+        res = System.shell_run(["netsh", "interface", "ipv4", "set", "subinterface", t_name, f"mtu={mtu_val}", "store=active"], timeout=6)
+        return res.returncode == 0
+    except Exception: return False
 
 # Service Class
 class NordWireConnectService(win32serviceutil.ServiceFramework):
@@ -196,6 +278,9 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
     def SvcDoRun(self):
         info("NordWireConnect service starting")
         self.ReportServiceStatus(win32service.SERVICE_RUNNING)
+        if windows_service.get_service_state("WireGuardTunnel$NordWireConnect") != win32service.SERVICE_RUNNING:
+            set_nrpt_dns_lock(False, flush_dns=False)
+            set_ipv6_instant_reject(False, flush_dns=False)
         if nord_socket.exists(): nord_socket.wait_till_free(timeout=15)
         nord_socket.subscribe("NordWireConnectCommands", self.handle_command)
         nord_socket.listen()
@@ -219,15 +304,33 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
         try:
             cmd = cmd_inf.get("cmd", "")
             if cmd not in quiet_commands: info(f"Received command: {cmd}")
-            if cmd == "end-wireguard": return windows_service._end_wireguard(self)
+            if cmd == "end-wireguard":
+                set_nrpt_dns_lock(False, flush_dns=False)
+                set_ipv6_instant_reject(False, flush_dns=True)
+                return windows_service._end_wireguard(self)
             elif cmd == "ui-opening": self.prevent_opening = False; return {"suc": True}
             elif cmd == "ui-closing": self.prevent_opening = True; return {"suc": True}
             elif cmd == "service-version": return {"suc": True, "version": version}
+            elif cmd == "set-nrpt-dns-lock":
+                ok = set_nrpt_dns_lock(bool(cmd_inf.get("enabled", False)), cmd_inf.get("dns_servers"), flush_dns=True)
+                return {"suc": ok}
+            elif cmd == "set-tunnel-mtu":
+                raw_mtu = cmd_inf.get("mtu")
+                if isinstance(raw_mtu, bool): return {"suc": False}
+                try: mtu_int = int(raw_mtu)
+                except Exception: return {"suc": False}
+                return {"suc": set_tunnel_mtu(mtu_int, cmd_inf.get("server") or "NordWireConnect")}
+            elif cmd == "set-ipv6-instant-reject":
+                ok = set_ipv6_instant_reject(bool(cmd_inf.get("enabled", False)), bool(cmd_inf.get("split_lan", False)), cmd_inf.get("reject_ipv6_cidrs"), flush_dns=True)
+                return {"suc": ok}
             elif cmd == "end-wireguard-installer": return windows_service._end_wireguard_installer()
             elif cmd == "uninstall-wire-tunnel":
                 service_name = sanitize_tunnel_name(cmd_inf.get("server") or "NordWireConnect")
                 remove = windows_service.uninstall_wireguard_service(service_name)
                 if self.connected_tunnel == service_name: self.connected_tunnel = None
+                if service_name == "NordWireConnect":
+                    set_nrpt_dns_lock(False, flush_dns=False)
+                    set_ipv6_instant_reject(False, flush_dns=False)
                 return {"suc": remove.returncode == 0, "res": remove.returncode}
             elif cmd == "install-wire-tunnel":
                 self.handle_command({"cmd": "unbrick-adapter"})
@@ -240,6 +343,12 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                     return {"suc": False, "res": add.returncode, "err": err_detail}
                 self.connected_tunnel = "NordWireConnect"
                 started = wait_for_service("WireGuardTunnel$NordWireConnect", timeout=15)
+                if started:
+                    set_nrpt_dns_lock(bool(cmd_inf.get("nrpt_dns_lock", True)), cmd_inf.get("dns_servers"), flush_dns=False)
+                    set_ipv6_instant_reject(bool(cmd_inf.get("instant_reject_ipv6", True)), bool(cmd_inf.get("split_lan", False)), cmd_inf.get("reject_ipv6_cidrs"), flush_dns=True)
+                else:
+                    set_nrpt_dns_lock(False, flush_dns=False)
+                    set_ipv6_instant_reject(False, flush_dns=False)
                 return {"suc": started, "res": add.returncode}
             elif cmd == "combined-disconnect":
                 server_name = cmd_inf.get("known_server", None)
@@ -254,6 +363,12 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
                 if add.returncode != 0: return {"suc": False, "res": add.returncode}
                 self.connected_tunnel = "NordWireConnect"
                 started = wait_for_service("WireGuardTunnel$NordWireConnect", timeout=15)
+                if started:
+                    set_nrpt_dns_lock(bool(cmd_inf.get("nrpt_dns_lock", bool(cmd_inf.get("dns_servers")))), cmd_inf.get("dns_servers"), flush_dns=False)
+                    set_ipv6_instant_reject(bool(cmd_inf.get("instant_reject_ipv6", True)), bool(cmd_inf.get("split_lan", False)), cmd_inf.get("reject_ipv6_cidrs"), flush_dns=True)
+                else:
+                    set_nrpt_dns_lock(False, flush_dns=False)
+                    set_ipv6_instant_reject(False, flush_dns=False)
                 return {"suc": started, "res": add.returncode}
             elif cmd == "combined-end-wireguard":
                 self.handle_command({"cmd": "end-wireguard"})

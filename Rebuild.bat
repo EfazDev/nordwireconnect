@@ -21,8 +21,8 @@ python -m nuitka ^
     --include-package=truststore ^
     --company-name="EfazDev" ^
     --product-name="NordWireConnect" ^
-    --file-version="1.3.5.0" ^
-    --product-version="1.3.5.0" ^
+    --file-version="1.5.0.0" ^
+    --product-version="1.5.0.0" ^
     --output-dir="Installer" ^
     --output-filename="NordWireConnect.exe" ^
     NordWireConnect.py
@@ -53,8 +53,8 @@ python -m nuitka ^
     --include-module=win32con ^
     --company-name="EfazDev" ^
     --product-name="NordWireConnectInstaller" ^
-    --file-version="1.3.5.0" ^
-    --product-version="1.3.5.0" ^
+    --file-version="1.5.0.0" ^
+    --product-version="1.5.0.0" ^
     --output-dir="dist" ^
     --output-filename="NordWireConnectInstaller.exe" ^
     Installer.py

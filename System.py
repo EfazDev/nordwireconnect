@@ -1,5 +1,8 @@
 import os
+import re
+import csv
 import sys
+import itertools
 import time
 import platform
 import subprocess
@@ -63,7 +66,7 @@ class SystemInterface:
     def unneeding_state(self): raise NotImplementedError
     def enable_debug_console(self, title: str="NordWireConnect", on_streams_changed=None): raise NotImplementedError
     def disable_debug_console(self, on_streams_changed=None): raise NotImplementedError
-
+    def get_physical_gateway_mtu(self) -> int: raise NotImplementedError
 class WindowsInterface(SystemInterface):
     def __init__(self):
         import win32api # type: ignore
@@ -266,21 +269,35 @@ class WindowsInterface(SystemInterface):
             if v.get("uptodate") and v.get("version"): return v
     def unarchive_asn_database(self, path: str):
         results = []
-        with self._gzip.open(path, "rt", encoding="utf-8") as f:
-            for line in f:
-                parts = line.strip().split("\t")
-                if len(parts) >= 5:
-                    start_ip = parts[0]
-                    end_ip = parts[1]
-                    asn = parts[2]
-                    asn_name = parts[4]
-                    if asn != "0":
-                        results.append({
-                            "s_ip": start_ip,
-                            "e_ip": end_ip,
-                            "asn": asn,
-                            "asn_name": asn_name
-                        })
+        with open(path, "rb") as bf: is_gz = bf.read(2) == b"\x1f\x8b"
+        opener = self._gzip.open(path, "rt", encoding="utf-8", errors="replace", newline="") if is_gz else open(path, "r", encoding="utf-8", errors="replace", newline="")
+        with opener as f:
+            first_line = ""
+            for raw in f:
+                s = raw.strip()
+                if s and not s.startswith("#"): first_line = raw; break
+            if not first_line: return results
+            chained = itertools.chain([first_line], f)
+            if "\t" in first_line:
+                for raw_line in chained:
+                    line = raw_line.rstrip("\r\n")
+                    if not line or line.startswith("#"): continue
+                    parts = line.split("\t")
+                    if len(parts) < 3: continue
+                    start_ip, end_ip, asn = parts[0].strip(), parts[1].strip(), parts[2].strip()
+                    asn_name = parts[4].strip() if len(parts) >= 5 else ""
+                    if not asn.isdigit() or asn == "0" or "." not in start_ip or "." not in end_ip: continue
+                    if not asn_name or asn_name.lower() in ("none", "unknown", "not routed"): asn_name = f"AS{asn}"
+                    results.append({"s_ip": start_ip, "e_ip": end_ip, "asn": asn, "asn_name": asn_name})
+            else:
+                for row in csv.reader(chained):
+                    if len(row) < 3: continue
+                    start_ip, end_ip, asn = row[0].strip(), row[1].strip(), row[2].strip()
+                    if start_ip.startswith("#"): continue
+                    asn_name = row[3].strip() if len(row) >= 4 else ""
+                    if not asn.isdigit() or asn == "0" or "." not in start_ip or "." not in end_ip: continue
+                    if not asn_name or asn_name.lower() in ("none", "unknown", "not routed"): asn_name = f"AS{asn}"
+                    results.append({"s_ip": start_ip, "e_ip": end_ip, "asn": asn, "asn_name": asn_name})
         return results
     def delete_shortcuts(self):
         try:
@@ -307,6 +324,12 @@ class WindowsInterface(SystemInterface):
         mainMessage("Stopping active WireGuard tunnel..")
         try: self.uninstall_wireguard_service("NordWireConnect")
         except Exception: pass
+        try: subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", "name=NordWireConnect_InstantRejectIPv6"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+        except Exception: pass
+        try: subprocess.run(["reg", "delete", r"HKLM\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters\DnsPolicyConfig\NordWireConnect", "/f"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+        except Exception: pass
+        try: subprocess.run(["netsh", "interface", "ipv6", "set", "prefixpolicy", "::ffff:0:0/96", "35", "4"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+        except Exception: pass
         mainMessage("Uninstalling Service..")
         subprocess.run(["sc", "stop", "NordWireConnectService"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
         subprocess.run(["sc", "delete", "NordWireConnectService"], capture_output=True, check=False, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
@@ -332,7 +355,7 @@ class WindowsInterface(SystemInterface):
         except Exception as e: errorMessage(f"Unable to reset DNS Cache: {str(e)}")
     def reset_networking(self):
         try:
-            with open(os.path.join(self.app_data_path, "ResetNetwork.bat"), "w") as f: f.write("@echo off\nnetsh winsock reset\nnetsh int ip reset\nipconfig /release\nipconfig /renew\nipconfig /flushdns\ntimeout 3\nshutdown /f /r /t 0\ntimeout 5")
+            with open(os.path.join(self.app_data_path, "ResetNetwork.bat"), "w") as f: f.write("@echo off\nreg delete \"HKLM\\SYSTEM\\CurrentControlSet\\Services\\Dnscache\\Parameters\\DnsPolicyConfig\\NordWireConnect\" /f >nul 2>&1\nnetsh advfirewall firewall delete rule name=NordWireConnect_InstantRejectIPv6\nnetsh interface ipv6 set prefixpolicy ::ffff:0:0/96 35 4\nnetsh winsock reset\nnetsh int ip reset\nipconfig /release\nipconfig /renew\nipconfig /flushdns\ntimeout 3\nshutdown /f /r /t 0\ntimeout 5")
             self.run_sudo_cmd(["cmd.exe", "/c", f"\"{os.path.join(self.app_data_path, 'ResetNetwork.bat')}\""])
         except Exception as e: errorMessage(f"Unable to reset Networking: {str(e)}")
     def clear_wireguard_conf_files(self):
@@ -414,6 +437,24 @@ class WindowsInterface(SystemInterface):
         self._ctypes.windll.kernel32.FreeConsole()
         self.console_allocated = False
         return True
+    def get_physical_gateway_mtu(self) -> int:
+        try:
+            route_out = shell_run(["netsh", "interface", "ipv4", "show", "route"], timeout=4).stdout
+            for line in route_out.splitlines():
+                lower_line = line.lower()
+                if "nordwireconnect" in lower_line or "wireguard" in lower_line or "0.0.0.0/0" not in line: continue
+                parts = line.split()
+                for i, tok in enumerate(parts):
+                    if tok == "0.0.0.0/0" and i + 1 < len(parts) and parts[i + 1].isdigit():
+                        iface_out = shell_run(["netsh", "interface", "ipv4", "show", "interface", parts[i + 1]], timeout=4).stdout
+                        m = re.search(r"\bmtu\s*:\s*(\d+)", iface_out, re.IGNORECASE)
+                        if m:
+                            mtu_val = int(m.group(1))
+                            if 576 <= mtu_val <= 9000: return mtu_val
+                        break
+        except Exception: pass
+        return 1500
+
 supported_systems = ["Windows"]
 not_supported_txt = "NordWireConnect is only supported on Windows and macOS."
 if platform.system() == "Windows": system = WindowsInterface()
