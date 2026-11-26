@@ -12,9 +12,9 @@ jobs:
             SKIP_SIGN: "1"
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
             - name: Setup Python (x64)
-              uses: actions/setup-python@v5
+              uses: actions/setup-python@v6
               with:
                 python-version: "3.14"
                 architecture: x64
@@ -26,7 +26,7 @@ jobs:
                 python -m pip install --upgrade pip
                 python -m pip install -r requirements.txt
             - name: Cache Nuitka (clcache + downloads)
-              uses: actions/cache@v4
+              uses: actions/cache@v5
               with:
                 path: ~\AppData\Local\Nuitka
                 key: nuitka-${{ runner.os }}-py314-${{ hashFiles('*.py') }}
@@ -43,7 +43,7 @@ jobs:
                 if-no-files-found: error
             - name: Upload crash report on failure
               if: failure()
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                 name: nuitka-crash-report
                 path: nuitka-crash-report.xml

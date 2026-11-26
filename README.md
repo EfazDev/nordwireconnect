@@ -18,6 +18,9 @@ NordWireConnect and Wireguard will require Administrator permissions before inst
 - Custom DNS (default is set to NordVPN)
 - Connection Channels (assign your computer to a channel in case to prevent conflicts on other computers on same account)
 - Private LAN Splitting (Connect to private IP addresses while using VPN for the internet) 
+- Pause VPN (Pause your VPN connection for a set amount of time)
+- Allowed Subnets (Add subnets to allow access without VPN)
+- Specialty Groups (Connect to a P2P, Double VPN, Onion over VPN server or Dedicated IP)
 - Auto Reconnect (similar to Wireguard where if you restart while connected, you reconnect again after reboot)
 - Load Swapping (If load is more than or equal to 50% (or set throttle), reconnect servers)
 - Optimize Server List (Load only 500 servers on the Server dropdown menu instead of all 8000+ servers)
@@ -26,7 +29,8 @@ NordWireConnect and Wireguard will require Administrator permissions before inst
 - Set Shortcuts (Creates Desktop Shortcuts)
 - Brute End Wireguard (As a last resort, if Wireguard breaks, you can force end the process.)
 - Plan Reminders (Reminds you before a certain amount of time that your NordVPN subscription is going to renew soon!)
-- Beta and Debugging Updates (Debug updates allow you to see app logs in a console window while Beta updates allow you to get testing updates)
+- Debugging (Debug window is able to be opened in the app allowing log access)
+- Beta Updates (Beta updates allow you to get testing updates)
 - Data Usage Reminders (Reminds you once the monthly data usage has reached the limit given)
 - Other Tweaks!
 
