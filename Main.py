@@ -184,7 +184,7 @@ full_files = False
 pystray_icon = None
 stop_app = False
 add_data_count = 0
-version = "1.5.0s"
+version = "1.5.0t"
 current_icon_name = "app_icon.ico"
 tray_ready = threading.Event()
 icon_lock = threading.Lock()
@@ -390,10 +390,10 @@ def get_server_location(server: dict) -> tuple[str, str]:
     return country_name, city_name
 def get_wireguard_public_key(server: dict) -> typing.Optional[str]:
     if not isinstance(server, dict): return None
-    for m in server.get("technologies", []):
+    for m in (server.get("technologies") or []):
         if not isinstance(m, dict) or m.get("id") != 35: continue
         pivot = m.get("pivot")
-        if isinstance(pivot, dict) and pivot.get("status", "online") != "online": return None
+        if isinstance(pivot, dict) and (pivot.get("status") or "online") != "online": return None
         meta = m.get("metadata")
         if not isinstance(meta, list): return None
         for item in meta:
@@ -404,20 +404,20 @@ def get_wireguard_public_key(server: dict) -> typing.Optional[str]:
 def server_has_group_id(server: dict, group_id: typing.Optional[int]) -> bool:
     if group_id is None: return True
     if not isinstance(server, dict): return False
-    return any(isinstance(g, dict) and g.get("id") == group_id for g in server.get("groups", []))
+    return any(isinstance(g, dict) and g.get("id") == group_id for g in (server.get("groups") or []))
 def get_group_query_filter(group_key: str=None) -> str:
-    key = group_key if group_key is not None else config_data.get("server_group", "all")
+    key = group_key if group_key is not None else (config_data.get("server_group") or "all")
     gid = nord_server_groups.get(key, (None, None))[1]
     return f"&filters[servers_groups]={gid}" if gid is not None else ""
 def encrypt_data(key_name: str, data: str) -> str: return system_class.encrypt_data(key_name, data)
 def decode_data(key_name: str, encrypted: str) -> str: return system_class.decrypt_data(key_name, encrypted)
 def _build_lazy_server_nodes(raw_servers: list) -> list[dict]:
-    active_group_id = nord_server_groups.get(config_data.get("server_group", "all"), (None, None))[1]
+    active_group_id = nord_server_groups.get(config_data.get("server_group") or "all", (None, None))[1]
     country_buckets = {}
     specialty_buckets = {g_key: {} for g_key, (_, g_id) in nord_server_groups.items() if g_id is not None}
     for s in raw_servers:
-        if not isinstance(s, dict) or s.get("status") != "online" or s.get("load", 0) == 0: continue
-        if not get_wireguard_public_key(s): continue
+        if not isinstance(s, dict) or s.get("status") != "online" or (s.get("load") or 0) == 0: continue
+        if not isinstance(s.get("name"), str) or not s["name"] or not get_wireguard_public_key(s): continue
         country_name, _ = get_server_location(s)
         if not country_name: continue
         for g_key, (_, g_id) in nord_server_groups.items():
@@ -567,14 +567,14 @@ def connect_selected_server_button():
     update_tray()
 def connect_history_server_button():
     generated_servers = {}
-    if not config_data.get("server_history"): config_data["server_history"] = []
-    for s in config_data.get("server_history", []):
+    if not isinstance(config_data.get("server_history"), list): config_data["server_history"] = []
+    for s in list(config_data.get("server_history") or []):
         if not isinstance(s, dict): continue
         country = s.get("country")
         city = s.get("city")
         server_name = s.get("name")
         date = s.get("time")
-        if not country or not city or not server_name or not isinstance(date, (int, float)): continue
+        if not country or not city or not isinstance(server_name, str) or not server_name or not isinstance(date, (int, float)): continue
         try: dt = datetime.datetime.fromtimestamp(date).astimezone()
         except Exception: continue
         day = convert_to_local(dt).strftime("%Y-%m-%d")
@@ -626,7 +626,7 @@ def get_latest_version() -> typing.Union[dict, None]:
             latest_version = requests.get("https://raw.githubusercontent.com/EfazDev/nordwireconnect/refs/heads/main/Version.json")
             if latest_version.ok and isinstance(latest_version.json, dict):
                 res = latest_version.json
-                for v in res.get("versions", []):
+                for v in (res.get("versions") or []):
                     if isinstance(v, dict) and v.get("version") and v.get("beta", False) == config_data.get("beta_updates", False): return v
     except Exception as e: errorMessage(f"Error while trying to check for updates: {trace(e)}")
 def get_latest_wireguard_version() -> dict:
@@ -639,22 +639,23 @@ def get_latest_wireguard_version() -> dict:
     except Exception as e: errorMessage(f"Error while trying to check for updates: {trace(e)}")
 def get_current_wireguard_version() -> typing.Union[str, None]: return system_class.get_current_wireguard_version()
 def auto_check_for_updates():
-    if session_data.get("connection_text", "").startswith("Connecting"):
-        while session_data.get("connection_text", "").startswith("Connecting"): time.sleep(0.2)
+    if (session_data.get("connection_text") or "").startswith("Connecting"):
+        while (session_data.get("connection_text") or "").startswith("Connecting"): time.sleep(0.2)
     wait_until_connected()
     latest_version = get_latest_version()
-    if latest_version and is_newer_version(latest_version["version"], version): 
+    if isinstance(latest_version, dict) and latest_version.get("version") and is_newer_version(latest_version["version"], version): 
         notification("Update Available!", f"NordWireConnect v{latest_version['version']} is now available for download!")
     def wireguard_update():
         latest_wireguard_version = get_latest_wireguard_version()
         current_wireguard_version = get_current_wireguard_version()
-        if not latest_wireguard_version: return
+        if not isinstance(latest_wireguard_version, dict) or not latest_wireguard_version.get("version"): return
         if not current_wireguard_version: return
         if is_newer_version(latest_wireguard_version["version"], current_wireguard_version): 
             notification("Wireguard Update Available!", f"Wireguard v{latest_wireguard_version['version']} is now available for download! It is suggested to update for security.")
     wireguard_update()
 def tkinter_install_wireguard_updates(latest_ver: str):
     try:
+        if not isinstance(latest_ver, dict) or not latest_ver.get("version"): return
         confirmed = messagebox.askyesno("Wireguard Update Available!", f"Wireguard v{latest_ver['version']} is now available to be downloaded!\nDo you wish to proceed?", icon="info")
         if confirmed:
             response = system_class.install_wireguard(send_command)
@@ -852,11 +853,11 @@ def get_if_within_reminder_period(expiry) -> typing.Union[int, None]:
     elif diff.days <= 120 and config_data.get("plan_reminder_level", 5) == 0: return 0
     else: return -1
 def get_if_within_data_usage() -> typing.Union[int, None]:
-    if config_data.get("monthly_data_usage"):
+    usage = config_data.get("monthly_data_usage")
+    if isinstance(usage, dict):
         cur_date = get_current_time()
-        usage = config_data["monthly_data_usage"]
-        total = usage["download"] + usage["upload"]
-        if usage["month"] != cur_date.month or usage["year"] != cur_date.year: total = 0
+        total = int(usage.get("download") or 0) + int(usage.get("upload") or 0)
+        if usage.get("month") != cur_date.month or usage.get("year") != cur_date.year: total = 0
         if total >= 1_000_000_000 and config_data.get("usage_reminder_level", 3) == 8: return 8
         elif total >= 5_000_000_000 and config_data.get("usage_reminder_level", 3) == 7: return 7
         elif total >= 10_000_000_000 and config_data.get("usage_reminder_level", 3) == 6: return 6
@@ -872,7 +873,7 @@ def refresh_data_usage():
     global data_reminded
     try:
         data_reminded = False
-        if config_data.get("monthly_data_usage", {}) and config_data.get("data_usage_reminder") == True:
+        if isinstance(config_data.get("monthly_data_usage"), dict) and config_data.get("data_usage_reminder") == True:
             res = get_if_within_data_usage()
             selector = {
                 8: "1 GB",
@@ -899,8 +900,9 @@ def refresh_plan_info():
             config_data["plan_renewal_data"] = {"expiry": plan_renewal_info.get("raw_expiry"), "active": plan_renewal_info.get("active")}
         else: config_data["plan_renewal_data"] = {"expiry": "0000-00-00 00:00:00", "active": False}
         plan_reminded = False
-        if config_data.get("plan_renewal_data", {}).get("active") and config_data.get("plan_renewal_reminder") == True:
-            res = get_if_within_reminder_period(config_data["plan_renewal_data"]["expiry"])
+        plan_data = config_data.get("plan_renewal_data")
+        if isinstance(plan_data, dict) and plan_data.get("active") and config_data.get("plan_renewal_reminder") == True:
+            res = get_if_within_reminder_period(plan_data.get("expiry"))
             selector = {
                 6: "a day",
                 5: "3 days",
@@ -1079,7 +1081,7 @@ def run_cache(force: bool=False):
             except Exception: pass
         if not force:
             conn_deadline = time.monotonic() + 25.0
-            while session_data.get("connection_text", "").startswith("Connecting"):
+            while (session_data.get("connection_text") or "").startswith("Connecting"):
                 if stop_app or time.monotonic() > conn_deadline: return
                 time.sleep(0.3)
         mainMessage("Updating server cache..")
@@ -1103,15 +1105,16 @@ def run_cache(force: bool=False):
                 with open(country_cache_path, "r", encoding="utf-8") as f: all_countries = json.load(f)
             else: return
         for s in raw_all_servers:
-            for l in s.get("locations", []):
+            if not isinstance(s, dict): continue
+            for l in (s.get("locations") or []):
                 country = l.get("country") if isinstance(l, dict) else None
                 c = country.get("city") if isinstance(country, dict) else None
                 if isinstance(c, dict) and "id" in c and "name" in c: all_cities[c["id"]] = c["name"]
-            if "id" in s and "name" in s: all_servers_by_id[s["name"].replace(" ", "").replace("#", "")] = s["id"]
+            if "id" in s and isinstance(s.get("name"), str): all_servers_by_id[s["name"].replace(" ", "").replace("#", "")] = s["id"]
         if not all_cities:
             for country in all_countries:
                 if not isinstance(country, dict): continue
-                for c in country.get("cities") or []:
+                for c in (country.get("cities") or []):
                     if isinstance(c, dict) and "id" in c and "name" in c: all_cities[c["id"]] = c["name"]
         all_cities_list = [{"id": i, "name": n} for i, n in all_cities.items()]
         write_json_atomic(server_cache_path, raw_servers)
@@ -1128,7 +1131,7 @@ def send_command(cmd: str, args: dict=None, timeout: float=20.0) -> dict:
     payload = {"cmd": cmd}
     if args: payload.update(args)
     res = nord_socket.request("NordWireConnectCommands", payload, timeout=timeout)
-    if res is None: return {}
+    if not isinstance(res, dict): return {}
     return res
 @functools.lru_cache(maxsize=5)
 def format_seconds(seconds: int) -> str:
@@ -1149,10 +1152,11 @@ def parse_wireguard_bytes(s: str) -> int:
     value, unit = s.split()
     return int(float(value) * (1024 ** units[unit]))
 def get_if_virtual_location(server: dict) -> bool:
-    for sp in server.get("specifications", []):
-        if sp["identifier"] == "virtual_location":
-            for val in sp["values"]:
-                if val["value"] == "true": return True
+    if not isinstance(server, dict): return False
+    for sp in (server.get("specifications") or []):
+        if isinstance(sp, dict) and sp.get("identifier") == "virtual_location":
+            for val in (sp.get("values") or []):
+                if isinstance(val, dict) and val.get("value") == "true": return True
     return False
 def change_dns():
     inputted = simpledialog.askstring(title="DNS Input", prompt="Enter IPv4 DNS servers to use (comma separated):", initialvalue=config_data.get("dns", "103.86.96.100, 103.86.99.100"))
@@ -1393,7 +1397,7 @@ def open_nord_dashboard():
     try: webbrowser.open("https://my.nordaccount.com/dashboard/nordvpn/")
     except Exception as e: errorMessage(f"Unable to open NordVPN Dashboard: {trace(e)}")
 def add_server_to_history(info: dict):
-    if not config_data.get("server_history"): config_data["server_history"] = []
+    if not isinstance(config_data.get("server_history"), list): config_data["server_history"] = []
     if not check_track_servers(): return
     history = config_data["server_history"]
     history.insert(0, info)
@@ -1404,16 +1408,16 @@ def add_data_usage_to_history(download: int, upload: int):
     global add_data_count
     if download < 0 or upload < 0: return
     cur_date = get_current_time()
-    if not config_data.get("monthly_data_usage"): config_data["monthly_data_usage"] = {"month": cur_date.month, "year": cur_date.year, "upload": 0, "download": 0}
-    if not config_data.get("total_data_usage"): config_data["total_data_usage"] = {"upload": 0, "download": 0}
+    if not isinstance(config_data.get("monthly_data_usage"), dict): config_data["monthly_data_usage"] = {"month": cur_date.month, "year": cur_date.year, "upload": 0, "download": 0}
+    if not isinstance(config_data.get("total_data_usage"), dict): config_data["total_data_usage"] = {"upload": 0, "download": 0}
     usage = config_data["monthly_data_usage"]
     total_usage = config_data["total_data_usage"]
     if usage.get("month") != cur_date.month or usage.get("year") != cur_date.year: usage = {"month": cur_date.month, "year": cur_date.year, "upload": 0, "download": 0}
-    usage["upload"] += upload
-    usage["download"] += download
+    usage["upload"] = int(usage.get("upload") or 0) + upload
+    usage["download"] = int(usage.get("download") or 0) + download
     config_data["monthly_data_usage"] = usage
-    total_usage["upload"] += upload
-    total_usage["download"] += download
+    total_usage["upload"] = int(total_usage.get("upload") or 0) + upload
+    total_usage["download"] = int(total_usage.get("download") or 0) + download
     config_data["total_data_usage"] = total_usage
     if data_reminded == False: refresh_data_usage()
     add_data_count += 1
@@ -1438,10 +1442,11 @@ def load_configuration():
     config_path = os.path.join(app_data_path, "ConnectConfig.json")
     if os.path.exists(config_path):
         with open(config_path, "r", encoding="utf-8") as f: temp_conf = json.load(f)
+        if not isinstance(temp_conf, dict): return
         for k, v in temp_conf.items():
             allowed_type = config_data_type_allowed.get(k)
-            if allowed_type is not None and isinstance(v, allowed_type): config_data[k] = v
-        if "load_swap_threshold" in temp_conf and isinstance(temp_conf["load_swap_threshold"], int): config_data["load_swapping_threshold"] = temp_conf["load_swap_threshold"]
+            if allowed_type is not None and isinstance(v, allowed_type) and not (isinstance(v, bool) and allowed_type is not bool): config_data[k] = v
+        if "load_swap_threshold" in temp_conf and isinstance(temp_conf["load_swap_threshold"], int) and not isinstance(temp_conf["load_swap_threshold"], bool): config_data["load_swapping_threshold"] = temp_conf["load_swap_threshold"]
         if config_data.get("data_encrypted") == False:
             for k in ["access_token", "openvpn_username", "openvpn_password"]:
                 if type(config_data.get(k)) is str and config_data.get(k): config_data[k] = encrypt_data(k, config_data[k])
@@ -1573,24 +1578,24 @@ def check_server_group(group_key: str): return config_data.get("server_group", "
 # Differenting Status
 def differ_from_status_text() -> str:
     if is_vpn_paused(): return "Resume VPN Now"
-    elif session_data["connected"] == True: return "Disconnect from Server"
-    elif session_data["connection_text"].startswith("Connecting"): return "Cancel Connection"
+    elif session_data.get("connected") == True: return "Disconnect from Server"
+    elif (session_data.get("connection_text") or "").startswith("Connecting"): return "Cancel Connection"
     else: return "Connect to Server"
 def differ_from_status_action():
     if is_vpn_paused():
         resume_paused_vpn()
         return
-    if session_data["connection_text"].startswith("Connecting"):
+    if (session_data.get("connection_text") or "").startswith("Connecting"):
         session_data["session_time"] = 0
         session_data["connection_text"] = "Not Connected"
         session_data["connected"] = False
         session_data["server"] = None
         reconnect_queued.clear()
         set_icon("app_icon.ico")
-    elif session_data["connected"] == True: 
+    elif session_data.get("connected") == True:
         s = disconnect()
         if s.get("suc") == True: successMessageBox("Successfully disconnected from NordVPN server!", "NordWireConnect")
-    else: 
+    else:
         default_loc = config_data.get("default_location", "auto") or "auto"
         if default_loc == "auto" or "_" not in default_loc:
             config_data["server"] = "auto"
@@ -1600,51 +1605,56 @@ def differ_from_status_action():
             config_data["server"] = server_loc
             addToThread(connect, (mode,), connection=True)
 def differ_from_status_action2():
-    if reconnect_queued.is_set() or is_vpn_paused() or session_data["connection_text"].startswith("Connecting") or session_data["connection_text"].startswith("Not"): return
+    conn_txt = session_data.get("connection_text") or ""
+    if reconnect_queued.is_set() or is_vpn_paused() or conn_txt.startswith("Connecting") or conn_txt.startswith("Not"): return
     reconnect_queued.set()
     def pre_connect():
         try: connect(exact_mode=session_data.get("exact_connect"))
         finally: reconnect_queued.clear()
     addToThread(pre_connect, (), connection=True)
-def differ_to_status(): return session_data["connection_text"]
+def differ_to_status(): return session_data.get("connection_text") or "Not Connected"
 def differ_to_city() -> str:
-    if session_data["connected"] == True and session_data.get("server"): return f"City: {get_server_location(session_data['server'])[1] or 'N/A'}"
+    srv = session_data.get("server")
+    if session_data.get("connected") == True and isinstance(srv, dict): return f"City: {get_server_location(srv)[1] or 'N/A'}"
     else: return "City: N/A"
-def differ_to_ip_add() -> str: 
-    if session_data["connected"] == True: return f"IP Address: {session_data['server']['station']}"
+def differ_to_ip_add() -> str:
+    srv = session_data.get("server")
+    if session_data.get("connected") == True and isinstance(srv, dict): return f"IP Address: {srv.get('station', 'N/A')}"
     else: return "IP Address: N/A"
-def differ_to_hostname() -> str: 
-    if session_data["connected"] == True: return f"Hostname: {session_data['server']['hostname']}"
+def differ_to_hostname() -> str:
+    srv = session_data.get("server")
+    if session_data.get("connected") == True and isinstance(srv, dict): return f"Hostname: {srv.get('hostname', 'N/A')}"
     else: return "Hostname: N/A"
-def differ_to_load() -> str: 
-    if session_data["connected"] == True: return f"Load: {session_data['current_load']}%"
+def differ_to_load() -> str:
+    if session_data.get("connected") == True and session_data.get("current_load") is not None: return f"Load: {session_data.get('current_load')}%"
     else: return "Load: N/A"
 def differ_to_health() -> str:
-    if session_data["connected"] == True: return f"Health: {session_data.get('server_health', 'Good')}"
+    if session_data.get("connected") == True: return f"Health: {session_data.get('server_health') or 'Good'}"
     else: return "Health: N/A"
-def differ_to_session_time() -> str: 
-    if session_data["connected"] == True: return f"Session Time: {format_seconds(session_data['session_time'])}"
+def differ_to_session_time() -> str:
+    if session_data.get("connected") == True: return f"Session Time: {format_seconds(session_data.get('session_time') or 0)}"
     else: return "Session Time: N/A"
-def differ_to_data_usage() -> str: 
-    if session_data["connected"] == True: return f"Data Usage: {session_data.get('download_data_usage', 'N/A')} ⬇️, {session_data.get('upload_data_usage', 'N/A')} ⬆️"
+def differ_to_data_usage() -> str:
+    if session_data.get("connected") == True: return f"Data Usage: {session_data.get('download_data_usage') or 'N/A'} ⬇️, {session_data.get('upload_data_usage') or 'N/A'} ⬆️"
     else: return "Data Usage: N/A"
 def differ_to_monthly_data_usage() -> str:
-    if config_data.get("monthly_data_usage"):
+    usage = config_data.get("monthly_data_usage")
+    if isinstance(usage, dict):
         cur_date = get_current_time()
-        usage = config_data["monthly_data_usage"]
-        if usage["month"] != cur_date.month or usage["year"] != cur_date.year: return "Monthly Data Usage: N/A"
-        return f"Monthly Data Usage: {format_wireguard_bytes(usage['download'])} ⬇️, {format_wireguard_bytes(usage['upload'])} ⬆️"
+        if usage.get("month") != cur_date.month or usage.get("year") != cur_date.year: return "Monthly Data Usage: N/A"
+        return f"Monthly Data Usage: {format_wireguard_bytes(int(usage.get('download') or 0))} ⬇️, {format_wireguard_bytes(int(usage.get('upload') or 0))} ⬆️"
     else: return "Monthly Data Usage: N/A"
 def differ_to_total_data_usage() -> str:
-    if config_data.get("total_data_usage"):
-        usage = config_data["total_data_usage"]
-        return f"Total Data Usage: {format_wireguard_bytes(usage['download'])} ⬇️, {format_wireguard_bytes(usage['upload'])} ⬆️"
+    usage = config_data.get("total_data_usage")
+    if isinstance(usage, dict): return f"Total Data Usage: {format_wireguard_bytes(int(usage.get('download') or 0))} ⬇️, {format_wireguard_bytes(int(usage.get('upload') or 0))} ⬆️"
     else: return "Total Data Usage: N/A"
-def differ_to_dns() -> str: 
+def differ_to_dns() -> str:
     if check_threat_protection_lite(): return "DNS Servers: Threat Protection Lite"
-    return f"DNS Servers: {config_data['dns']}"
-def differ_to_nord_acc() -> str: return f"Account: {config_data.get('username', 'N/A')} (Token {len(config_data.get('access_token', '')) > 60 and 'Given' or 'Ungiven'})"
-def differ_to_channel() -> str: return f"Connection Channel: {config_data.get('connection_channel', 'N/A')}"
+    return f"DNS Servers: {config_data.get('dns') or '103.86.96.100, 103.86.99.100'}"
+def differ_to_nord_acc() -> str: return f"Account: {config_data.get('username') or 'N/A'} (Token {len(config_data.get('access_token') or '') > 60 and 'Given' or 'Ungiven'})"
+def differ_to_channel() -> str:
+    ch = config_data.get("connection_channel")
+    return f"Connection Channel: {ch if ch is not None else 'N/A'}"
 def differ_to_keepalive() -> str: return f"Persistent Keepalive: {config_data.get('persistent_keepalive', 25)}s"
 def differ_to_mtu() -> str:
     if isinstance(config_data.get("mtu"), int): return f"WireGuard MTU: {config_data['mtu']}"
@@ -1652,27 +1662,30 @@ def differ_to_mtu() -> str:
 def differ_to_allowlist() -> str:
     subs = config_data.get("allowlisted_subnets") or []
     return f"Allowlisted Subnets: {len(subs)} rule(s)" if subs else "Allowlisted Subnets: None"
-def differ_to_server_group() -> str: return f"Server Group: {nord_server_groups.get(config_data.get('server_group', 'all'), ('All Servers', None))[0]}"
-def differ_to_def_loc() -> str: 
+def differ_to_server_group() -> str: return f"Server Group: {nord_server_groups.get(config_data.get('server_group') or 'all', ('All Servers', None))[0]}"
+def differ_to_def_loc() -> str:
     default_loc = config_data.get("default_location")
-    if default_loc and default_loc.lower() != "auto" and "_" in default_loc:
+    if isinstance(default_loc, str) and default_loc and default_loc.lower() != "auto" and "_" in default_loc:
         _, server_loc = default_loc.split("_", 1)
         return f"Default Location: {server_loc}"
     else: return "Default Location: Auto"
 def differ_to_load_swap_usage() -> str: return f"Load Swapping Threshold: {config_data.get('load_swapping_threshold', 50)}%"
 def differ_to_renewal_active() -> str:
-    if config_data.get("plan_renewal_data", {}).get("active"): return "Plan Active: True"
+    plan_data = config_data.get("plan_renewal_data")
+    if isinstance(plan_data, dict) and plan_data.get("active"): return "Plan Active: True"
     else: return "Plan Active: False"
 def differ_to_renewal_date() -> str:
-    if config_data.get("plan_renewal_data", {}).get("active") and config_data["plan_renewal_data"].get("expiry"):
-        expiry_date = convert_nordtime_to_datetime(config_data["plan_renewal_data"]["expiry"])
+    plan_data = config_data.get("plan_renewal_data")
+    if isinstance(plan_data, dict) and plan_data.get("active") and plan_data.get("expiry"):
+        expiry_date = convert_nordtime_to_datetime(plan_data["expiry"])
         if not expiry_date: return "Plan Renewal Date: N/A"
         return f"Plan Renewal Date: {expiry_date.astimezone().strftime('%a %B %d, %Y at %H:%M:%S')}"
     else: return "Plan Renewal Date: N/A"
 def differ_to_renewal_remaining() -> str:
-    if config_data.get("plan_renewal_data", {}).get("active") and config_data["plan_renewal_data"].get("expiry"):
+    plan_data = config_data.get("plan_renewal_data")
+    if isinstance(plan_data, dict) and plan_data.get("active") and plan_data.get("expiry"):
         current_date = get_current_time()
-        expiry_date = convert_nordtime_to_datetime(config_data["plan_renewal_data"]["expiry"])
+        expiry_date = convert_nordtime_to_datetime(plan_data["expiry"])
         if not expiry_date: return "Plan Renewal Remaining: N/A"
         time_diff = expiry_date - current_date
         str_list = []
@@ -1903,7 +1916,7 @@ def pause_vpn(seconds: int, label: str=""):
     global pause_until_monotonic
     global paused_target
     if not session_data.get("connected"): return
-    paused_target = {"server": session_data.get("org_server_id") or config_data.get("server", "auto"), "exact_mode": session_data.get("exact_connect")}
+    paused_target = {"server": session_data.get("org_server_id") or config_data.get("server") or "auto", "exact_mode": session_data.get("exact_connect")}
     pause_until_monotonic = time.monotonic() + float(seconds)
     disconnect(only_disconnect=True)
     session_data["session_time"] = 0
@@ -1922,7 +1935,7 @@ def resume_paused_vpn():
     global pause_until_monotonic
     global paused_target
     pause_until_monotonic = 0.0
-    target = paused_target or {"server": config_data.get("server", "auto"), "exact_mode": None}
+    target = paused_target or {"server": config_data.get("server") or "auto", "exact_mode": None}
     paused_target = None
     config_data["server"] = target.get("server") or "auto"
     session_data["connection_text"] = "Connecting..."
@@ -1949,15 +1962,16 @@ def connect_session():
     global last_tunnel_tx
     global last_physical_ips
     global active_tunnel_mtu
-    if session_data.get("connected") == True and config_data.get("auto_connect", True) == True and session_data.get("server"):
+    srv = session_data.get("server")
+    if session_data.get("connected") == True and config_data.get("auto_connect", True) == True and isinstance(srv, dict):
         stats = send_command("tunnel-stats", timeout=5)
         if stats.get("active") == True and tunnel_check(timeout=2):
-            mainMessage(f"Adopted active WireGuard session on {session_data['server']['name']}!")
-            connect_monotonic_time = time.monotonic() - float(session_data.get("session_time", 0) or 0)
-            last_tunnel_rx = int(stats.get("rx_bytes", 0))
-            last_tunnel_tx = int(stats.get("tx_bytes", 0))
+            mainMessage(f"Adopted active WireGuard session on {srv.get('name', 'Unknown')}!")
+            connect_monotonic_time = time.monotonic() - float(session_data.get("session_time") or 0)
+            last_tunnel_rx = int(stats.get("rx_bytes") or 0)
+            last_tunnel_tx = int(stats.get("tx_bytes") or 0)
             last_physical_ips = get_physical_ipv4_set()
-            session_data["server_health"] = evaluate_server_health(session_data["server"], stats.get("handshake_age"))
+            session_data["server_health"] = evaluate_server_health(srv, stats.get("handshake_age"))
             session_data["download_data_usage"] = format_wireguard_bytes(last_tunnel_rx)
             session_data["upload_data_usage"] = format_wireguard_bytes(last_tunnel_tx)
             send_command("set-nrpt-dns-lock", {"enabled": check_routing_leak_protection(), "dns_servers": get_active_conf_dns()}, timeout=8)
@@ -1968,17 +1982,17 @@ def connect_session():
             update_tray()
             return
         mainMessage("Restoring previous session...")
-        org = session_data.get("org_server_id", "auto")
+        org = session_data.get("org_server_id") or "auto"
         org_exact_connect = session_data.get("exact_connect")
-        prev_server_short = session_data["server"]["name"].replace(" ", "").replace("#", "")
-        connect_server(prev_server_short, exact_mode="server")
+        prev_server_short = (srv.get("name") or "").replace(" ", "").replace("#", "")
+        if prev_server_short: connect_server(prev_server_short, exact_mode="server")
         config_data["server"] = org
         session_data["exact_connect"] = org_exact_connect
         if not session_data.get("connected") and org:
             mainMessage("Previous node unavailable; falling back to saved location preference..")
             config_data["server"] = org
             connect(exact_mode=org_exact_connect)
-    elif session_data.get("connection_text", "").startswith("Connecting"):
+    elif (session_data.get("connection_text") or "").startswith("Connecting"):
         mainMessage("Reconnecting..")
         session_data["connected"] = False
         session_data["connection_text"] = "Not Connected"
@@ -2086,7 +2100,8 @@ def connect(exact_mode: str=None):
                 set_icon("error.ico")
                 return
 
-        cached_plan = config_data.get("plan_renewal_data") or {}
+        cached_plan = config_data.get("plan_renewal_data")
+        if not isinstance(cached_plan, dict): cached_plan = {}
         if cached_plan.get("expiry"):
             cached_exp_dt = convert_nordtime_to_datetime(cached_plan["expiry"])
             if cached_exp_dt and cached_exp_dt <= get_current_time():
@@ -2104,7 +2119,7 @@ def connect(exact_mode: str=None):
 
         refresh_user_insights(force=False)
         prune_excluded_hosts()
-        active_group_key = config_data.get("server_group", "all")
+        active_group_key = config_data.get("server_group") or "all"
         active_group_id = nord_server_groups.get(active_group_key, (None, None))[1]
         group_filter = get_group_query_filter(active_group_key)
         coord_query = get_coordinates_query()
@@ -2128,8 +2143,10 @@ def connect(exact_mode: str=None):
                 if not os.path.exists(country_list_path): run_cache(force=True)
                 if os.path.exists(country_list_path):
                     with open(country_list_path, "r", encoding="utf-8") as f:
-                        for c in json.load(f):
-                            if c.get("name") == group_country: c_filter = f"&filters[country_id]={c.get('id')}"; break
+                        country_list_raw = json.load(f)
+                    if isinstance(country_list_raw, list):
+                        for c in country_list_raw:
+                            if isinstance(c, dict) and c.get("name") == group_country: c_filter = f"&filters[country_id]={c.get('id')}"; break
             g_q = f"&filters[servers_groups]={sel_group_id}" if sel_group_id is not None else ""
             resp = fetch_server_recommendations(f"https://api.nordvpn.com/v1/servers/recommendations?{server_filter}{c_filter}{wireguard_tech_filter}{g_q}{coord_query}&limit=100")
             if resp.ok and isinstance(resp.json, list): all_server_recommendations = resp.json
@@ -2142,7 +2159,7 @@ def connect(exact_mode: str=None):
                 set_icon("error.ico")
                 return
             should_filter = True
-        elif config_data["server"] == "auto" or config_data["server"] == None or exact_mode == None:
+        elif config_data.get("server") == "auto" or config_data.get("server") == None or exact_mode == None:
             resp = fetch_server_recommendations(f"https://api.nordvpn.com/v1/servers/recommendations?{server_filter}{wireguard_tech_filter}{group_filter}{coord_query}&limit=100")
             if resp.ok and isinstance(resp.json, list): all_server_recommendations = resp.json
             else:
@@ -2164,10 +2181,11 @@ def connect(exact_mode: str=None):
                 return
             with open(country_list_path, "r", encoding="utf-8") as f: country_list = json.load(f)
             country_id = None
-            for c in country_list:
-                if c.get("name") == config_data["server"]:
-                    country_id = c.get("id")
-                    break
+            if isinstance(country_list, list):
+                for c in country_list:
+                    if isinstance(c, dict) and c.get("name") == config_data.get("server"):
+                        country_id = c.get("id")
+                        break
             if country_id == None:
                 errorMessage("Unable to get NordVPN country ID.")
                 mark_not_connected()
@@ -2177,7 +2195,7 @@ def connect(exact_mode: str=None):
             if resp.ok and isinstance(resp.json, list): all_server_recommendations = resp.json
             else:
                 from_cache = True
-                all_server_recommendations = rank_servers_by_penalty([s for s in load_cached_servers() if get_server_location(s)[0] == config_data["server"] and server_has_group_id(s, active_group_id)])[:100]
+                all_server_recommendations = rank_servers_by_penalty([s for s in load_cached_servers() if get_server_location(s)[0] == config_data.get("server") and server_has_group_id(s, active_group_id)])[:100]
             if not all_server_recommendations:
                 errorMessage("Unable to get NordVPN server recommendations.")
                 mark_not_connected()
@@ -2194,10 +2212,11 @@ def connect(exact_mode: str=None):
                 return
             with open(city_list_path, "r", encoding="utf-8") as f: city_list = json.load(f)
             city_id = None
-            for c in city_list:
-                if c.get("name") == config_data["server"]:
-                    city_id = c.get("id")
-                    break
+            if isinstance(city_list, list):
+                for c in city_list:
+                    if isinstance(c, dict) and c.get("name") == config_data.get("server"):
+                        city_id = c.get("id")
+                        break
             if city_id == None:
                 errorMessage("Unable to get NordVPN city ID.")
                 mark_not_connected()
@@ -2207,7 +2226,7 @@ def connect(exact_mode: str=None):
             if resp.ok and isinstance(resp.json, list): all_server_recommendations = resp.json
             else:
                 from_cache = True
-                all_server_recommendations = rank_servers_by_penalty([s for s in load_cached_servers() if get_server_location(s)[1] == config_data["server"] and server_has_group_id(s, active_group_id)])[:100]
+                all_server_recommendations = rank_servers_by_penalty([s for s in load_cached_servers() if get_server_location(s)[1] == config_data.get("server") and server_has_group_id(s, active_group_id)])[:100]
             if not all_server_recommendations:
                 errorMessage("Unable to get NordVPN server recommendations.")
                 mark_not_connected()
@@ -2216,7 +2235,7 @@ def connect(exact_mode: str=None):
             should_filter = True
         elif exact_mode == "asn":
             load_server_asn_map()
-            try: city_name, target_asn = config_data["server"].rsplit("|||", 1)
+            try: city_name, target_asn = (config_data.get("server") or "").rsplit("|||", 1)
             except Exception:
                 errorMessage("Invalid ASN format given.")
                 mark_not_connected()
@@ -2232,10 +2251,11 @@ def connect(exact_mode: str=None):
                 return
             with open(city_list_path, "r", encoding="utf-8") as f: city_list = json.load(f)
             city_id = None
-            for c in city_list:
-                if c.get("name") == city_name:
-                    city_id = c.get("id")
-                    break
+            if isinstance(city_list, list):
+                for c in city_list:
+                    if isinstance(c, dict) and c.get("name") == city_name:
+                        city_id = c.get("id")
+                        break
             if city_id is None:
                 errorMessage("Unable to get NordVPN city ID.")
                 mark_not_connected()
@@ -2246,7 +2266,7 @@ def connect(exact_mode: str=None):
             all_server_recommendations = []
             for server in city_servers:
                 if len(all_server_recommendations) >= 100: break
-                if active_group_id is not None and not server_has_group_id(server, active_group_id): continue
+                if not isinstance(server, dict) or (active_group_id is not None and not server_has_group_id(server, active_group_id)): continue
                 server_ip = server.get("station") 
                 if server_ip:
                     asn_name = get_asn_name_from_ip(server_ip)
@@ -2268,11 +2288,11 @@ def connect(exact_mode: str=None):
                 set_icon("error.ico")
                 return
             with open(server_list_path, "r", encoding="utf-8") as f: server_id_list = json.load(f)
-            server_id = server_id_list.get(config_data["server"])
+            server_id = server_id_list.get(config_data.get("server")) if isinstance(server_id_list, dict) else None
             if server_id:
                 resp = fetch_server_recommendations(f"https://api.nordvpn.com/v1/servers?{server_filter}&filters[servers.id]={server_id}&limit=1")
                 if resp.ok and isinstance(resp.json, list) and resp.json: all_server_recommendations = resp.json
-                else: all_server_recommendations = [s for s in load_cached_servers() if s.get("id") == server_id]
+                else: all_server_recommendations = [s for s in load_cached_servers() if isinstance(s, dict) and s.get("id") == server_id]
                 if not all_server_recommendations:
                     errorMessage("Unable to get NordVPN server recommendations.")
                     mark_not_connected()
@@ -2296,16 +2316,17 @@ def connect(exact_mode: str=None):
                 return
             should_filter = True
 
+        all_server_recommendations = [s for s in all_server_recommendations if isinstance(s, dict)]
         if should_filter and excluded_maintenance_hosts:
             non_excluded = [s for s in all_server_recommendations if s.get("hostname") not in excluded_maintenance_hosts]
             if non_excluded: all_server_recommendations = non_excluded
         if should_filter and config_data.get("connection_channel"):
-            channeled_list = [s for s in all_server_recommendations if convert_to_channel(s["hostname"]) == config_data.get("connection_channel")]
+            channeled_list = [s for s in all_server_recommendations if s.get("hostname") and convert_to_channel(s["hostname"]) == config_data.get("connection_channel")]
             if channeled_list: all_server_recommendations = channeled_list
         if should_filter and len(all_server_recommendations) > 1:
             if check_load_swapping():
                 threshold = config_data.get("load_swapping_threshold", 50)
-                low_load = [s for s in all_server_recommendations if s.get("load", 100) < threshold]
+                low_load = [s for s in all_server_recommendations if (s.get("load") if isinstance(s.get("load"), (int, float)) else 100) < threshold]
                 if low_load: all_server_recommendations = low_load
             if from_cache: all_server_recommendations = rank_servers_by_penalty(all_server_recommendations)
             if last_swapped_server_id is not None:
@@ -2336,7 +2357,7 @@ def connect(exact_mode: str=None):
         keepalive_val = config_data.get("persistent_keepalive", 25)
         for s in all_server_recommendations:
             if attempts >= max_attempts: break
-            if not s.get("name"): continue
+            if not isinstance(s.get("name"), str) or not s["name"]: continue
             shortened_name = s["name"].replace(" ", "").replace("#", "")
             raw_country, raw_city = get_server_location(s)
             country_name = raw_country.replace(" ", "")
@@ -2346,8 +2367,8 @@ def connect(exact_mode: str=None):
             elif target_server_cfg not in ("auto", None):
                 matched = shortened_name == target_norm or city_name == target_norm or country_name == target_norm or (asn_city_norm is not None and city_name == asn_city_norm)
                 if not matched: continue
-            if session_data["connection_text"] == "Not Connected" and session_data["connected"] == False: break
-            if s.get("status") != "online" or s.get("load", 0) == 0:
+            if session_data.get("connection_text") == "Not Connected" and session_data.get("connected") == False: break
+            if s.get("status") != "online" or (s.get("load") or 0) == 0:
                 mainMessage(f"Server offline: {s['name']}")
                 continue
             wg_pub_key = get_wireguard_public_key(s)
@@ -2475,8 +2496,9 @@ def disconnect(only_disconnect: bool=False) -> dict:
     global paused_target
     mainMessage("Disconnecting Wireguard..")
     awared = None
-    if session_data.get("connected") == True and session_data.get("server"):
-        server_name = session_data["server"]["name"].replace(" ", "").replace("#", "")
+    srv = session_data.get("server")
+    if session_data.get("connected") == True and isinstance(srv, dict) and isinstance(srv.get("name"), str):
+        server_name = srv["name"].replace(" ", "").replace("#", "")
         awared = server_name
     last_tunnel_rx = 0
     last_tunnel_tx = 0
@@ -2503,12 +2525,13 @@ def brute_end_wireguard():
 def update_ui_timer():
     global last_tray_signature
     try:
-        if session_data.get("connected") == True and session_data.get("server"):
+        srv = session_data.get("server")
+        if session_data.get("connected") == True and isinstance(srv, dict):
             if connect_monotonic_time > 0: session_data["session_time"] = max(0, int(time.monotonic() - connect_monotonic_time))
-            srv_name = session_data["server"].get("name", "Unknown")
-            city_name = get_server_location(session_data["server"])[1] or "N/A"
-            if pystray_icon: pystray_icon.title = f"NordWireConnect v{version}\nConnected to {srv_name}!\nCity: {city_name}\nSession Time: {format_seconds(session_data['session_time'])}"
-            sig = (True, srv_name, session_data.get("current_load"), session_data.get("server_health"), session_data.get("download_data_usage"), session_data.get("upload_data_usage"), session_data["session_time"] // 5)
+            srv_name = srv.get("name") or "Unknown"
+            city_name = get_server_location(srv)[1] or "N/A"
+            if pystray_icon: pystray_icon.title = f"NordWireConnect v{version}\nConnected to {srv_name}!\nCity: {city_name}\nSession Time: {format_seconds(session_data.get('session_time') or 0)}"
+            sig = (True, srv_name, session_data.get("current_load"), session_data.get("server_health"), session_data.get("download_data_usage"), session_data.get("upload_data_usage"), (session_data.get("session_time") or 0) // 5)
             if sig != last_tray_signature:
                 last_tray_signature = sig
                 update_tray()
@@ -2542,17 +2565,19 @@ def connection_monitor_loop():
         if stop_app: break
         tick += 1
         try:
+            plan_data = config_data.get("plan_renewal_data")
+            if not isinstance(plan_data, dict): plan_data = {}
             if tick % 60 == 0:
-                if config_data.get("plan_renewal_reminder", True) and config_data.get("plan_renewal_data", {}).get("active") and not plan_reminded: refresh_plan_info()
-            elif not plan_reminded and config_data.get("plan_renewal_reminder", True) and config_data.get("plan_renewal_data", {}).get("active") and config_data.get("plan_renewal_data", {}).get("expiry"):
-                if get_if_within_reminder_period(config_data["plan_renewal_data"]["expiry"]) != -1: refresh_plan_info()
+                if config_data.get("plan_renewal_reminder", True) and plan_data.get("active") and not plan_reminded: refresh_plan_info()
+            elif not plan_reminded and config_data.get("plan_renewal_reminder", True) and plan_data.get("active") and plan_data.get("expiry"):
+                if get_if_within_reminder_period(plan_data.get("expiry")) != -1: refresh_plan_info()
             if tick % 360 == 0 and not session_data.get("connected") and not is_vpn_paused(): refresh_user_insights(force=False)
-            if is_vpn_paused() or not session_data.get("connected") or reconnect_queued.is_set() or session_data.get("connection_text", "").startswith("Connecting"): continue
+            if is_vpn_paused() or not session_data.get("connected") or reconnect_queued.is_set() or (session_data.get("connection_text") or "").startswith("Connecting"): continue
             stats = send_command("tunnel-stats", timeout=8)
             if not stats or stats.get("suc") != True: continue
             if stats.get("service_running"):
-                rx_now = int(stats.get("rx_bytes", 0))
-                tx_now = int(stats.get("tx_bytes", 0))
+                rx_now = int(stats.get("rx_bytes") or 0)
+                tx_now = int(stats.get("tx_bytes") or 0)
                 delta_rx = (rx_now - last_tunnel_rx) if rx_now >= last_tunnel_rx else rx_now
                 delta_tx = (tx_now - last_tunnel_tx) if tx_now >= last_tunnel_tx else tx_now
                 last_tunnel_rx = rx_now
@@ -2587,7 +2612,8 @@ def connection_monitor_loop():
                 continue
             hs_age = stats.get("handshake_age")
             if hs_age is not None and hs_age > 175.0: tunnel_check(timeout=1.5)
-            if session_data.get("server"): session_data["server_health"] = evaluate_server_health(session_data["server"], hs_age)
+            cur_srv = session_data.get("server")
+            if isinstance(cur_srv, dict): session_data["server_health"] = evaluate_server_health(cur_srv, hs_age)
             if config_data.get("loss_connect_protection", True) and not in_connect_grace and not in_resume_grace:
                 if stats.get("service_running") == False:
                     warnMessage("WireGuard tunnel service stopped unexpectedly; reconnecting..")
@@ -2604,19 +2630,18 @@ def connection_monitor_loop():
                 if tick % 6 == 0:
                     if not tunnel_check(timeout=2.5):
                         time.sleep(2.5)
-                        if not tunnel_check(timeout=3.0) and not session_data["connection_text"].startswith("Connecting"):
+                        if not tunnel_check(timeout=3.0) and not (session_data.get("connection_text") or "").startswith("Connecting"):
                             warnMessage("End-to-end connectivity lost; reconnecting..")
                             differ_from_status_action2()
                             continue
-            if tick % 12 == 0 and session_data.get("server"):
-                server_id = session_data["server"]["id"]
+            if tick % 12 == 0 and isinstance(cur_srv, dict) and cur_srv.get("id"):
+                server_id = cur_srv["id"]
                 servers_resp = requests.get(f"https://api.nordvpn.com/v1/servers?{server_filter}&filters[servers.id]={server_id}&limit=1", timeout=8)
                 if servers_resp.ok and isinstance(servers_resp.json, list):
-                    matched_srv = next((srv for srv in servers_resp.json if srv.get("id") == server_id), None)
+                    matched_srv = next((srv for srv in servers_resp.json if isinstance(srv, dict) and srv.get("id") == server_id), None)
                     if matched_srv is None or matched_srv.get("status") != "online" or get_wireguard_public_key(matched_srv) is None:
                         session_data["server_health"] = "Maintenance"
                         if check_server_health_monitor():
-                            cur_srv = session_data["server"]
                             exclude_maintenance_host(cur_srv.get("hostname", ""))
                             last_swapped_server_id = server_id
                             if session_data.get("exact_connect") == "server":
@@ -2635,7 +2660,7 @@ def connection_monitor_loop():
                             differ_from_status_action2()
                             continue
                     else:
-                        session_data["current_load"] = matched_srv.get("load", session_data["current_load"])
+                        session_data["current_load"] = matched_srv.get("load", session_data.get("current_load"))
                         session_data["server_health"] = evaluate_server_health(matched_srv, hs_age)
                 threshold = config_data.get("load_swapping_threshold", 50)
                 if check_load_swapping() and session_data.get("exact_connect") != "server" and isinstance(session_data.get("current_load"), (int, float)) and session_data["current_load"] >= threshold:
@@ -2714,7 +2739,13 @@ def app():
         if os.path.exists(os.path.join(app_data_path, "NordSessionData.json")): 
             with open(os.path.join(app_data_path, "NordSessionData.json"), "r", encoding="utf-8") as f:
                 loaded_sess = json.load(f)
-                if isinstance(loaded_sess, dict): session_data.update(loaded_sess)
+                if isinstance(loaded_sess, dict):
+                    for sk, sv in loaded_sess.items():
+                        if sv is None and sk in ("connection_text", "download_data_usage", "upload_data_usage", "server_health", "session_time", "connected"): continue
+                        if sk == "connected" and not isinstance(sv, bool): continue
+                        if sk == "session_time" and (not isinstance(sv, (int, float)) or isinstance(sv, bool)): continue
+                        if sk in ("connection_text", "download_data_usage", "upload_data_usage", "server_health") and not isinstance(sv, str): continue
+                        session_data[sk] = sv
         legacy_status = os.path.join(app_data_path, "ConnectionStatus")
         if os.path.exists(legacy_status):
             try: os.remove(legacy_status)

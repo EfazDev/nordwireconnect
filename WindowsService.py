@@ -33,7 +33,7 @@ import win32serviceutil # type: ignore
 program_files = os.path.join(os.getenv("ProgramFiles") or r"C:\Program Files", "NordWireConnect")
 nordwireconnect_location = os.path.join(program_files, "NordWireConnect.exe")
 wireguard_location = os.path.join(os.getenv("ProgramFiles") or r"C:\Program Files", "WireGuard")
-version = "1.5.0s"
+version = "1.5.0t"
 windows_service = System.WindowsInterface()
 nord_socket = PyKits.Socket(port=61245)
 terminal = PyKits.Terminal()
@@ -101,7 +101,7 @@ def setup_logging():
 # Unbricking
 def shell_run(cmd: str | list) -> subprocess.CompletedProcess[str]: 
     s = System.shell_run(cmd)
-    if s.returncode != 0: error(f"Command failed ({cmd}): {s.stderr.strip()}")
+    if s.returncode != 0: error(f"Command failed ({cmd}): {(s.stderr or '').strip()}")
     return s
 def format_wg_bytes(n: int) -> str:
     val = float(n)
@@ -135,7 +135,7 @@ def get_tunnel_stats(tunnel_name: str="NordWireConnect") -> dict:
     except Exception: pass
     try:
         wg_check = windows_service.run_wireguard_command(["show", tunnel_name])
-        output = wg_check.stdout.strip().lower()
+        output = (wg_check.stdout or "").strip().lower()
     except Exception: output = ""
     has_hs = ("latest handshake" in output) and ("latest handshake: never" not in output)
     return {"suc": True, "service_running": True, "active": has_hs, "has_handshake": has_hs, "handshake_age": 0.0 if has_hs else None, "rx_bytes": 0, "tx_bytes": 0}
@@ -302,7 +302,8 @@ class NordWireConnectService(win32serviceutil.ServiceFramework):
     def handle_command(self, cmd_inf: dict) -> dict:
         cmd = "<unknown>"
         try:
-            cmd = cmd_inf.get("cmd", "")
+            if not isinstance(cmd_inf, dict): return {"suc": False, "res": "1"}
+            cmd = str(cmd_inf.get("cmd") or "")
             if cmd not in quiet_commands: info(f"Received command: {cmd}")
             if cmd == "end-wireguard":
                 set_nrpt_dns_lock(False, flush_dns=False)

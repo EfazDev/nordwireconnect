@@ -117,8 +117,8 @@ class WindowsInterface(SystemInterface):
             p = self._winshell.SHGetFolderPath(0, csidl, None, 0)
             if p and os.path.isdir(p): return p
         except Exception: pass
-        if name == "Desktop": return os.path.join(os.environ.get("USERPROFILE", ""), "Desktop")
-        return os.path.join(os.getenv("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs")
+        if name == "Desktop": return os.path.join(os.environ.get("USERPROFILE") or "", "Desktop")
+        return os.path.join(os.getenv("APPDATA") or "", "Microsoft", "Windows", "Start Menu", "Programs")
     def setup_shortcuts(self, button: bool=False):
         def _create_all(target_exe: str, icon_path: str, desktop_dir: str, programs_dir: str):
             shell = self._win32com_client.Dispatch("WScript.Shell")
@@ -264,9 +264,9 @@ class WindowsInterface(SystemInterface):
                     except Exception: pass
         return None
     def format_for_latest_wireguard(self, wireguard_json: dict):
-        if wireguard_json.get("windowsdl-win"):
-            v = wireguard_json.get("windowsdl-win", {})
-            if v.get("uptodate") and v.get("version"): return v
+        if not isinstance(wireguard_json, dict): return None
+        v = wireguard_json.get("windowsdl-win")
+        if isinstance(v, dict) and v.get("uptodate") and v.get("version"): return v
     def unarchive_asn_database(self, path: str):
         results = []
         with open(path, "rb") as bf: is_gz = bf.read(2) == b"\x1f\x8b"
